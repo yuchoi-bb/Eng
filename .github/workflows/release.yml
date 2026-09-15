@@ -92,33 +92,25 @@ jobs:
 
       - name: 릴리즈 노트 작성
         run: |
-          cat > release-notes.md <<'NOTES'
-          ## 설치
-
-          아래 APK를 안드로이드 기기에서 내려받아 설치합니다.
-          "출처를 알 수 없는 앱" 설치를 한 번 허용해야 합니다.
-
-          ## 서명
-
-          레포에 담긴 **고정 디버그 키스토어**로 서명했습니다. 빌드마다 서명이 같으므로
-          기존 앱 위에 덮어쓰기로 설치되고, 학습 기록이 유지됩니다.
-
-          Play Store 업로드용 키가 아닙니다. 스토어 배포는 S1에서 별도 업로드 키로 진행합니다.
-
-          ## 범위
-
-          S0 (REQUIREMENTS §11.1) — 영상 업로드 + 수동 문장 입력 + 예산 기반 반복 세션 +
-          쉐도잉 3단계 모드. 외부 API를 쓰지 않으므로 유튜브 경로와 발음 채점은 아직 없습니다.
-          NOTES
+          set -euo pipefail
+          # 이번 변경은 VERSION을 올린 커밋의 메시지에서 가져온다.
+          # 워크플로에 범위를 하드코딩하면 기능이 늘어도 노트가 옛말을 하게 된다.
           {
+            echo "## 이번 변경"
+            echo ""
+            git log -1 --pretty=format:%B "$GITHUB_SHA" | sed '/^Co-Authored-By:/d; /^Claude-Session:/d'
+            echo ""
+            cat .github/release-notes-footer.md
             echo ""
             echo "## 검증"
             echo ""
             echo '```'
-            echo "커밋    ${GITHUB_SHA}"
+            echo "커밋    $GITHUB_SHA"
             echo "SHA-256 ${{ steps.apk.outputs.sha256 }}"
             echo '```'
-          } >> release-notes.md
+          } > release-notes.md
+          echo "--- 생성된 노트:"
+          cat release-notes.md
 
       - name: 릴리즈 게시
         env:
@@ -131,9 +123,10 @@ jobs:
             git tag "$tag"
             git push origin "$tag"
           fi
-          # 같은 태그로 다시 돌리면 자산만 갈아 끼운다.
+          # 같은 태그로 다시 돌리면 자산과 노트를 함께 갈아 끼운다.
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "${{ steps.apk.outputs.path }}" --clobber
+            gh release edit "$tag" --notes-file release-notes.md
           else
             gh release create "$tag" "${{ steps.apk.outputs.path }}" \
               --title "$tag" --notes-file release-notes.md
