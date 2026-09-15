@@ -1,0 +1,43 @@
+{
+  "//": "복합 인덱스만 선언한다. 단일 필드 인덱스는 Firestore가 자동 생성한다. 근거: docs/FIRESTORE_SCHEMA.md §5",
+  "indexes": [
+    {
+      "//": "F-4 주제별 추천 조회: where(topic ==) + orderBy(publishedAt desc)",
+      "collectionGroup": "recommendationPool",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "topic", "order": "ASCENDING" },
+        { "fieldPath": "publishedAt", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": [
+    {
+      "//": "recommendationPool.expiresAt 에 TTL 정책을 적용한다 (O-5, 보관 90일). TTL 자체는 gcloud firestore fields ttls update 로 설정하며 이 파일은 색인 제외만 선언한다.",
+      "collectionGroup": "recommendationPool",
+      "fieldPath": "expiresAt",
+      "indexes": []
+    },
+    {
+      "//": "긴 텍스트 필드는 색인 대상이 아니다. 쓰기 비용과 저장량을 줄인다.",
+      "collectionGroup": "sentences",
+      "fieldPath": "text",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "sentences",
+      "fieldPath": "translationKo",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "sentences",
+      "fieldPath": "transliterationKo",
+      "indexes": []
+    },
+    {
+      "collectionGroup": "sentences",
+      "fieldPath": "breathGroups",
+      "indexes": []
+    }
+  ]
+}

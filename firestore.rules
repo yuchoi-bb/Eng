@@ -1,0 +1,171 @@
+rules_version = '2';
+
+// 영어 쉐도잉 앱 — Firestore 보안 규칙 (O-6)
+// 상세 근거: docs/FIRESTORE_SCHEMA.md §4
+//
+// 소유권은 경로로 판정한다. 본인 이메일 화이트리스트(REQUIREMENTS §9.2, O-4)는
+// Cloud Run 프록시의 책임이며, 여기서는 "인증된 본인의 경로"만 보장한다.
+// 규칙 파일에 이메일을 하드코딩하지 않는다.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- 공통 헬퍼 ----------
+
+    function signedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+
+    // 앱이 아는 스키마 버전. 구버전 클라이언트가 신버전 문서를 망가뜨리지 못하게 한다.
+    function validSchemaVersion() {
+      return incoming().schemaVersion is int
+          && incoming().schemaVersion >= 1
+          && incoming().schemaVersion <= 1;
+    }
+
+    // 생성이 아닌 갱신에서 해당 필드가 바뀌지 않았는지 검사
+    function unchanged(field) {
+      return !(field in incoming()) || incoming()[field] == existing()[field];
+    }
+
+    // ---------- 사용자 루트 ----------
+
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+      allow create: if isOwner(uid) && validSchemaVersion();
+      allow update: if isOwner(uid) && validSchemaVersion();
+      allow delete: if false;   // 계정 삭제는 콘솔/관리자 경로로만
+
+      // ---------- 일일 로그 ----------
+      // 문서 ID = yyyy-MM-dd (REQUIREMENTS §4.6 — 자정 롤오버 작업 없음)
+      match /dailyLogs/{date} {
+        allow read: if isOwner(uid);
+
+        allow create: if isOwner(uid)
+                      && validSchemaVersion()
+                      && incoming().date == date
+                      && incoming().dailyTargetSec is int
+                      && incoming().dailyTargetSec > 0;
+
+        // date와 dailyTargetSec은 그날의 분모이므로 고정한다.
+        // 바뀌면 §4.7 적응 로직의 완료율이 소급해서 오염된다.
+        allow update: if isOwner(uid)
+                      && validSchemaVersion()
+                      && unchanged('date')
+                      && unchanged('dailyTargetSec');
+
+        allow delete: if false;   // 학습 이력은 지우지 않는다
+      }
+
+      // ---------- 영상 계획 ----------
+      // 문서 ID = YT_<videoId> | UP_<uuid>  (sourceRef 중복 등록 방지)
+      match /videoPlans/{videoPlanId} {
+        allow read: if isOwner(uid);
+
+        allow create: if isOwner(uid)
+                      && validSchemaVersion()
+                      && incoming().source in ['YOUTUBE', 'UPLOAD']
+                      && incoming().type in ['DRILL', 'SINGLE', 'DIALOGUE']
+                      && incoming().cefr in ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
+                      && incoming().timestampUnit in ['SECOND', 'MILLISECOND']
+                      && incoming().language == 'en';   // 전사 스키마 V-9
+
+        // 전사 결과의 정체성 필드는 불변.
+        allow update: if isOwner(uid)
+                      && validSchemaVersion()
+                      && unchanged('source')
+                      && unchanged('sourceRef')
+                      && unchanged('speechStartMs')
+                      && unchanged('speechEndMs');
+
+        allow delete: if isOwner(uid);
+
+        // 문장 — 검증(TRANSCRIPTION_SCHEMA §4.2)을 통과한 내용만 기록되며
+        // 수동 교정(§4.3) 외에는 갱신하지 않는다.
+        match /sentences/{paddedIndex} {
+          allow read: if isOwner(uid);
+
+          allow create: if isOwner(uid)
+                        && incoming().index is int
+                        && incoming().text is string
+                        && incoming().text.size() > 0
+                        && incoming().translationKo is string
+                        && incoming().startMs is int
+                        && incoming().endMs is int
+                        && incoming().startMs < incoming().endMs   // V-2
+                        && incoming().keywords is list
+                        && incoming().keywords.size() > 0;         // V-6 이후 항상 ≥ 1
+
+          // 교정 경로: 텍스트는 바꿀 수 있으나 index와 시각은 고정
+          allow update: if isOwner(uid)
+                        && unchanged('index')
+                        && unchanged('startMs')
+                        && unchanged('endMs')
+                        && incoming().edited == true;
+
+          allow delete: if isOwner(uid);
+        }
+      }
+
+      // ---------- 문장 진행도 ----------
+      match /sentenceProgress/{sentenceId} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+                              && incoming().clearedStage is int
+                              && incoming().clearedStage >= 0
+                              && incoming().clearedStage <= 3;
+        allow delete: if isOwner(uid);
+      }
+
+      // ---------- 복습 큐 (F-6) ----------
+      match /reviewQueue/{sentenceId} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+                              && incoming().stage is int
+                              && incoming().stage >= 0
+                              && incoming().stage <= 3
+                              && incoming().nextDueDate is string
+                              && incoming().lastResult in ['PASS', 'FAIL'];
+        allow delete: if isOwner(uid);   // stage 3 통과 시 졸업 삭제
+      }
+
+      // ---------- 추천 개인화 상태 (F-4) ----------
+      match /recommendationState/{videoId} {
+        allow read: if isOwner(uid);
+        allow write: if isOwner(uid)
+                     && incoming().status in ['SEEN', 'DISMISSED', 'STARTED', 'COMPLETED'];
+      }
+
+      // ---------- 표현 은행 (F-8, v2 — v1은 적재만) ----------
+      match /expressions/{lemmaKey} {
+        allow read: if isOwner(uid);
+        allow write: if isOwner(uid);
+      }
+    }
+
+    // ---------- 추천 풀 (공유, 배치 전용) ----------
+    // 배치는 Admin SDK로 쓰므로 이 규칙을 우회한다.
+    // 클라이언트 쓰기를 전면 차단해도 Cloud Scheduler 배치는 영향받지 않는다.
+    match /recommendationPool/{videoId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    // ---------- 배치 커서 (앱 접근 없음) ----------
+    match /meta/{document=**} {
+      allow read, write: if false;
+    }
+
+    // ---------- 그 외 전부 거부 ----------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -350,12 +350,22 @@ RecommendationPool(videoId, cefr, wpm, topic, channelId)
 
 | ID | 항목 | 상태 |
 |---|---|---|
-| O-1 | ESL 채널 화이트리스트 선정 | 미정 — 후보 조사 필요 (10~20개) |
+| O-1 | ESL 채널 화이트리스트 선정 | ✅ **기준 확정** — RECOMMENDATION_POOL.md §1. 선정 기준(C-1~C-6)과 후보 10종을 확정했다. **채널 ID는 문서에 적지 않는다** — 5.1절의 환각 금지 원칙이 채널 ID에도 적용되므로, §1.4 절차로 API에서 해석한다. 운영자 확인 1회 필요 |
 | O-2 | L3 발음 엔진 최종 선택 | **보류** — v2 항목이므로 지금 결정 불필요 |
 | O-3 | 전사 응답 JSON 스키마 확정 | ✅ **해결** — TRANSCRIPTION_SCHEMA.md (schemaVersion 1) |
-| O-4 | 프록시 인증 방식 | ✅ **해결** — Firebase Auth + 이메일 화이트리스트 1개 |
-| O-5 | 추천 풀 갱신 주기 및 보관 기간 | 미정 — 기본값 제안으로 갈음 예정 |
-| O-6 | Firestore 스키마 및 보안 규칙 | 신규 — 9.1.1 동기화 범위 기준으로 작성 |
+| O-4 | 프록시 인증 방식 | ✅ **해결** — Firebase Auth + 이메일 화이트리스트 1개. 이메일 대조는 **프록시 계층 책임**이며 Firestore 규칙은 `request.auth.uid` 경로 소유권만 검사한다 (FIRESTORE_SCHEMA.md §4) |
+| O-5 | 추천 풀 갱신 주기 및 보관 기간 | ✅ **해결** — RECOMMENDATION_POOL.md §2. 1일 1회 03:00 KST 증분 배치 / 신규 분류 1일 20편 / 풀 150~300편 / 보관 90일 TTL. 분류 상한의 제약은 YouTube 쿼터(23 units·0.23%)가 아니라 **Gemini 영상 처리 예산**이다 |
+| O-6 | Firestore 스키마 및 보안 규칙 | ✅ **해결** — FIRESTORE_SCHEMA.md (schemaVersion 1), `firestore.rules`, `firestore.indexes.json` |
+| O-7 | 복습 큐 stage 3 통과 후 처리 | **제안 기본값** — 큐에서 졸업 삭제하고 `sentenceProgress`에만 이력을 남긴다 (FIRESTORE_SCHEMA.md §3.5). 7.1절에 명시가 없어 신규 등록 |
+
+### 10.1 O-6 작업에서 확정된 9.3절 수정
+
+| 항목 | 9.3절 초안 | 확정 |
+|---|---|---|
+| `SentenceProgress.firstRecordingUri` | 로컬 URI 문자열 | **Cloud Storage 객체 경로**. 9.1.1절에서 동기화되는 유일한 녹음이므로 로컬 경로를 넣으면 다른 태블릿에서 F-9 비교 재생이 깨진다 |
+| 업로드 영상 재생 URI | 언급 없음 | **Firestore에 저장하지 않는다.** `content://` URI와 persistable 권한은 그 기기의 그 설치본에만 유효하다. `videoPlanId → 로컬 URI` 매핑은 기기 로컬 DataStore에 둔다 |
+| `DailySpeechLog.dailyTargetSec` | 필드 존재 | **그날의 목표를 스냅샷으로 고정.** `settings`에서만 읽으면 4.7절 적응 로직이 예산을 바꾼 순간 과거 완료율이 소급 오염되고, 그 완료율을 다시 입력으로 쓰므로 되먹임이 깨진다 |
+| 9.1절 "기본 Last-Write-Wins로 충분" | 전역 적용 | **누적 카운터는 예외.** `achievedSec` 같은 값에 LWW를 적용하면 두 태블릿이 오프라인에서 각각 누적한 발화 시간 중 한쪽이 통째로 사라진다. `FieldValue.increment()`를 쓴다 (FIRESTORE_SCHEMA.md §2) |
 
 ---
 
