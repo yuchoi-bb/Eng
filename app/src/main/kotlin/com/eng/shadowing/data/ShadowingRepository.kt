@@ -47,6 +47,14 @@ public class ShadowingRepository(private val store: LocalStore) {
 
     public fun localMediaUri(planId: String): String? = _state.value.localMediaUris[planId]
 
+    public fun recordUpdateCheck(epochMs: Long) {
+        mutate { it.copy(lastUpdateCheckEpochMs = epochMs) }
+    }
+
+    public fun skipUpdateVersion(version: String) {
+        mutate { it.copy(skippedUpdateVersion = version) }
+    }
+
     public fun today(date: LocalDate): DailySpeechLog =
         DailyProgress.logFor(_state.value.dailyLogs, date, _state.value.settings.dailyTargetSec)
 

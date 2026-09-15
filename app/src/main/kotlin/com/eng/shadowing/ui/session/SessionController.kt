@@ -1,13 +1,9 @@
 package com.eng.shadowing.ui.session
 
 import android.content.Context
-import android.net.Uri
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
-import androidx.annotation.OptIn
-import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.ExoPlayer
 import com.eng.shadowing.core.model.Sentence
 import com.eng.shadowing.core.model.SentenceId
 import com.eng.shadowing.core.model.VideoPlan
@@ -16,8 +12,9 @@ import com.eng.shadowing.core.session.PracticeUnit
 import com.eng.shadowing.core.session.SessionEngine
 import com.eng.shadowing.core.session.SessionEvent
 import com.eng.shadowing.core.session.ShadowingStage
-import com.eng.shadowing.media.SegmentPlayer
+import com.eng.shadowing.media.RecordingPlayer
 import com.eng.shadowing.media.SentenceRecorder
+import com.eng.shadowing.media.SourcePlayback
 import java.io.File
 
 internal data class SessionUiState(
@@ -44,21 +41,24 @@ internal data class SessionUiState(
  * 연결하기만 한다 — 카운트 규칙이 UI에 스며들면 §7.2의 "3단계 완주 = 1카운트"가
  * 화면마다 달라진다.
  */
-@OptIn(UnstableApi::class)
 internal class SessionController(
     context: Context,
     private val plan: VideoPlan,
-    private val mediaUri: Uri,
     private val playbackRate: Float,
 ) {
-    private val player = SegmentPlayer(context)
     private val recorder = SentenceRecorder(context)
+    private val recordingPlayer = RecordingPlayer()
     private val engine = SessionEngine(plan)
+
+    /**
+     * 원본 재생기. 화면이 뷰를 만든 뒤에 붙인다 — 업로드는 ExoPlayer, 유튜브는
+     * IFrame Player를 쓰는데 둘 다 안드로이드 뷰가 먼저 있어야 만들어진다.
+     */
+    private var source: SourcePlayback? = null
 
     private val _uiState: MutableState<SessionUiState> = mutableStateOf(snapshot())
     val uiState: State<SessionUiState> get() = _uiState
 
-    val playerInstance: ExoPlayer get() = player.player
     val achievedSec: Int get() = engine.achievedSec
     val completedCounts: Int get() = engine.completedCounts
 
@@ -67,8 +67,12 @@ internal class SessionController(
     /** snapshot()이 자기 자신을 읽지 않도록 녹음 여부는 따로 들고 있는다. */
     private var isRecording = false
 
+    fun attachSource(playback: SourcePlayback) {
+        source = playback
+    }
+
     fun start() {
-        if (started) return
+        if (started || source == null) return
         started = true
         beginStage()
     }
@@ -90,7 +94,7 @@ internal class SessionController(
         isRecording = false
         _uiState.value = snapshot()
 
-        player.play(mediaUri, segment, playbackRate) {
+        source?.playSegment(segment, playbackRate) {
             if (engine.requiresRecording) {
                 startRecording(step.sentenceIndex)
             } else {
@@ -151,8 +155,8 @@ internal class SessionController(
         val sentence = plan.sentences[step.sentenceIndex]
         val recording = latestRecordingFor(step.sentenceIndex) ?: return
 
-        player.play(mediaUri, segmentFor(step.unit, sentence), playbackRate) {
-            player.playRecording(Uri.fromFile(recording)) {
+        source?.playSegment(segmentFor(step.unit, sentence), playbackRate) {
+            recordingPlayer.play(recording) {
                 // 비교가 끝나면 현재 단계를 처음부터 다시 듣는다.
                 beginStage()
             }
@@ -164,7 +168,9 @@ internal class SessionController(
 
     fun release() {
         recorder.stop()
-        player.release()
+        recordingPlayer.release()
+        source?.release()
+        source = null
     }
 
     private fun snapshot(): SessionUiState {

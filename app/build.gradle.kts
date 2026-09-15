@@ -1,3 +1,19 @@
+/**
+ * 버전은 루트의 VERSION 파일 하나로 정한다.
+ *
+ * 릴리즈 워크플로가 같은 파일에서 태그를 만들므로, 기기에 깔린 앱의 versionName과
+ * GitHub 릴리즈의 태그가 항상 같은 값을 가리킨다. 인앱 업데이트 확인이 그 일치에 의존한다.
+ */
+val appVersionName: String = rootProject.file("VERSION").readText().trim().removePrefix("v")
+
+/** core의 AppVersion.versionCode와 같은 규칙. 둘이 어긋나면 업데이트 판단이 흔들린다. */
+val appVersionCode: Int = appVersionName.substringBefore('-').split('.').let { parts ->
+    val major = parts.getOrNull(0)?.toIntOrNull() ?: 0
+    val minor = parts.getOrNull(1)?.toIntOrNull() ?: 0
+    val patch = parts.getOrNull(2)?.toIntOrNull() ?: 0
+    (major * 1_000_000 + minor.coerceAtMost(999) * 1_000 + patch.coerceAtMost(999)).coerceAtLeast(1)
+}
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -13,8 +29,11 @@ android {
         applicationId = "com.eng.shadowing"
         minSdk = 26          // Photo Picker 백포트와 MediaExtractor 사용 범위
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0-S0"
+        versionCode = appVersionCode
+        versionName = appVersionName
+
+        // 인앱 업데이트가 릴리즈를 조회할 저장소. 공개 저장소라 토큰이 필요 없다.
+        buildConfigField("String", "UPDATE_REPO", "\"yuchoi-bb/Eng\"")
     }
 
     /**
@@ -50,6 +69,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     compileOptions {
@@ -75,6 +95,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.kotlinx.coroutines.android)
 
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
@@ -84,4 +105,5 @@ dependencies {
 
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)
+    implementation(libs.youtube.player)
 }

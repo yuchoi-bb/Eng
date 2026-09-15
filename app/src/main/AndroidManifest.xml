@@ -4,6 +4,17 @@
     <!-- F-3 세션의 말하기 단계에서 녹음한다 (§4.5). -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
+    <!-- 유튜브 임베드 재생과 인앱 업데이트 확인. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!--
+      사이드로드 배포라 Play Store의 자동 업데이트가 없다. 새 APK를 앱이 직접 받아
+      설치 화면까지 연결하려면 이 권한이 필요하다. 사용자가 "이 앱의 설치 허용"을
+      한 번 켜야 실제로 동작한다.
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <application
         android:name=".EngApplication"
         android:allowBackup="true"
@@ -23,15 +34,30 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!--
-              REQUIREMENTS §9.1 — ACTION_SEND 리시버.
-              S0는 영상 공유만 받는다. text/plain(유튜브 URL)은 S1에서 붙인다.
-            -->
+            <!-- REQUIREMENTS §9.1 — ACTION_SEND 리시버. 업로드 영상(F-2). -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="video/*" />
             </intent-filter>
+
+            <!-- §F-1 — 유튜브 앱에서 "공유"로 넘어오는 쇼츠 링크. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
         </activity>
+
+        <!-- 내려받은 APK를 패키지 설치 화면에 넘기는 통로. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.updates"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/update_paths" />
+        </provider>
     </application>
 </manifest>

@@ -8,12 +8,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import com.eng.shadowing.core.model.VideoSource
 import com.eng.shadowing.data.ShadowingRepository
 import com.eng.shadowing.ui.entry.ManualEntryScreen
 import com.eng.shadowing.ui.home.HomeScreen
 import com.eng.shadowing.ui.onboarding.OnboardingScreen
 import com.eng.shadowing.ui.session.SessionScreen
 import com.eng.shadowing.ui.session.SessionSetupScreen
+import com.eng.shadowing.ui.session.SessionSource
+import com.eng.shadowing.ui.update.UpdateGate
 import java.time.LocalDate
 
 /**
@@ -23,7 +26,7 @@ import java.time.LocalDate
 internal sealed interface Screen {
     data object Onboarding : Screen
     data object Home : Screen
-    data class ManualEntry(val videoUri: Uri?) : Screen
+    data class ManualEntry(val videoUri: Uri?, val youTubeVideoId: String? = null) : Screen
     data class SessionSetup(val planId: String) : Screen
     data class Session(val planId: String) : Screen
 }
@@ -32,6 +35,7 @@ internal sealed interface Screen {
 public fun AppRoot(
     repository: ShadowingRepository,
     sharedVideoUri: Uri?,
+    sharedYouTubeVideoId: String?,
     onSharedVideoConsumed: () -> Unit,
     onKeepScreenOn: (Boolean) -> Unit,
 ) {
@@ -44,14 +48,22 @@ public fun AppRoot(
         )
     }
 
-    // 공유로 들어온 영상은 바로 문장 입력 화면으로 보낸다.
+    // 공유로 들어온 영상이나 유튜브 링크는 바로 문장 입력 화면으로 보낸다.
     // 컴포지션 도중에 상태를 바꾸면 재구성이 꼬이므로 부수효과로 뺀다.
-    LaunchedEffect(sharedVideoUri) {
-        if (sharedVideoUri != null) {
-            screen = Screen.ManualEntry(sharedVideoUri)
+    LaunchedEffect(sharedVideoUri, sharedYouTubeVideoId) {
+        if (sharedVideoUri != null || sharedYouTubeVideoId != null) {
+            screen = Screen.ManualEntry(sharedVideoUri, sharedYouTubeVideoId)
             onSharedVideoConsumed()
         }
     }
+
+    // 사이드로드 배포라 자동 업데이트가 없다. 새 릴리즈가 나오면 앱이 직접 묻는다.
+    UpdateGate(
+        lastCheckedEpochMs = state.lastUpdateCheckEpochMs,
+        skippedVersion = state.skippedUpdateVersion,
+        onChecked = repository::recordUpdateCheck,
+        onSkipVersion = repository::skipUpdateVersion,
+    )
 
     when (val current = screen) {
         Screen.Onboarding -> OnboardingScreen(
@@ -73,6 +85,7 @@ public fun AppRoot(
 
         is Screen.ManualEntry -> ManualEntryScreen(
             initialVideoUri = current.videoUri,
+            initialYouTubeVideoId = current.youTubeVideoId,
             onCancel = { screen = Screen.Home },
             onSaved = { plan, localUri ->
                 repository.putPlan(plan, localUri)
@@ -101,13 +114,20 @@ public fun AppRoot(
 
         is Screen.Session -> {
             val plan = state.plans[current.planId]
-            val mediaUri = repository.localMediaUri(current.planId)
-            if (plan == null || mediaUri == null) {
+            // 유튜브는 sourceRef가 곧 영상 ID다. 업로드는 이 기기에 원본이 있어야 한다(§10.1).
+            val sessionSource = when {
+                plan == null -> null
+                plan.transcript.source == VideoSource.YOUTUBE ->
+                    SessionSource.YouTube(plan.transcript.sourceRef)
+                else -> repository.localMediaUri(current.planId)
+                    ?.let { SessionSource.Upload(Uri.parse(it)) }
+            }
+            if (plan == null || sessionSource == null) {
                 LaunchedEffect(current.planId) { screen = Screen.Home }
             } else {
                 SessionScreen(
                     plan = plan,
-                    mediaUri = Uri.parse(mediaUri),
+                    source = sessionSource,
                     playbackRate = state.settings.playbackRate,
                     showTransliteration = state.settings.showTransliterationKo,
                     onKeepScreenOn = onKeepScreenOn,

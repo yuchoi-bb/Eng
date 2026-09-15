@@ -12,11 +12,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.eng.shadowing.core.source.YouTubeUrl
 import com.eng.shadowing.ui.AppRoot
 
 public class MainActivity : ComponentActivity() {
 
     private var sharedVideoUri by mutableStateOf<Uri?>(null)
+    private var sharedYouTubeVideoId by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -30,7 +32,11 @@ public class MainActivity : ComponentActivity() {
                     AppRoot(
                         repository = repository,
                         sharedVideoUri = sharedVideoUri,
-                        onSharedVideoConsumed = { sharedVideoUri = null },
+                        sharedYouTubeVideoId = sharedYouTubeVideoId,
+                        onSharedVideoConsumed = {
+                            sharedVideoUri = null
+                            sharedYouTubeVideoId = null
+                        },
                         onKeepScreenOn = ::keepScreenOn,
                     )
                 }
@@ -52,15 +58,24 @@ public class MainActivity : ComponentActivity() {
      */
     private fun handleShare(intent: Intent?) {
         if (intent?.action != Intent.ACTION_SEND) return
-        if (intent.type?.startsWith("video/") != true) return
 
-        val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
-        } else {
-            @Suppress("DEPRECATION")
-            intent.getParcelableExtra(Intent.EXTRA_STREAM)
+        when {
+            // F-2 — 기기에 있는 영상.
+            intent.type?.startsWith("video/") == true -> {
+                sharedVideoUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM)
+                }
+            }
+
+            // F-1 — 유튜브 앱의 공유. 제목과 안내 문구가 섞여 오므로 URL을 찾아낸다.
+            intent.type == "text/plain" -> {
+                val shared = intent.getStringExtra(Intent.EXTRA_TEXT)
+                sharedYouTubeVideoId = YouTubeUrl.extractVideoId(shared)
+            }
         }
-        sharedVideoUri = uri
     }
 
     /** §4.5 — 세션 중에는 화면을 켜 둔다. 손이 자유롭지 않은 무한 루프이기 때문이다. */

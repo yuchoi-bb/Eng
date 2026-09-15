@@ -2,7 +2,6 @@ package com.eng.shadowing.ui.session
 
 import android.Manifest
 import android.content.pm.PackageManager
-import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
@@ -36,7 +35,10 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
 import com.eng.shadowing.core.model.VideoPlan
 import com.eng.shadowing.core.session.ShadowingStage
+import com.eng.shadowing.media.SegmentPlayer
+import com.eng.shadowing.media.YouTubeSourcePlayback
 import com.eng.shadowing.ui.ProgressBar
+import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.views.YouTubePlayerView
 
 /**
  * 반복 세션 화면. REQUIREMENTS §4.5 / §7.2.
@@ -48,14 +50,14 @@ import com.eng.shadowing.ui.ProgressBar
 @Composable
 internal fun SessionScreen(
     plan: VideoPlan,
-    mediaUri: Uri,
+    source: SessionSource,
     playbackRate: Float,
     showTransliteration: Boolean,
     onKeepScreenOn: (Boolean) -> Unit,
     onFinished: (achievedSec: Int, counts: Int) -> Unit,
 ) {
     val context = LocalContext.current
-    val controller = remember(plan.id.value) { SessionController(context, plan, mediaUri, playbackRate) }
+    val controller = remember(plan.id.value) { SessionController(context, plan, playbackRate) }
     val ui by controller.uiState
 
     var permissionGranted by remember {
@@ -93,15 +95,32 @@ internal fun SessionScreen(
     }
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
-        AndroidView(
-            factory = { viewContext ->
-                PlayerView(viewContext).apply {
-                    useController = false
-                    player = controller.playerInstance
-                }
-            },
-            modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
-        )
+        // 두 소스가 서로 다른 재생기를 쓴다. 뷰가 만들어진 뒤에야 재생기를 붙일 수 있으므로
+        // factory 안에서 컨트롤러에 연결한다 — §F-1은 유튜브를 공식 임베드로만 재생하게 한다.
+        val playerModifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+        when (source) {
+            is SessionSource.Upload -> AndroidView(
+                factory = { viewContext ->
+                    val playback = SegmentPlayer(viewContext).apply { mediaUri = source.uri }
+                    controller.attachSource(playback)
+                    PlayerView(viewContext).apply {
+                        useController = false
+                        player = playback.player
+                    }
+                },
+                modifier = playerModifier,
+            )
+
+            is SessionSource.YouTube -> AndroidView(
+                factory = { viewContext ->
+                    YouTubePlayerView(viewContext).also { view ->
+                        controller.attachSource(YouTubeSourcePlayback(view, source.videoId))
+                    }
+                },
+                onRelease = { view -> view.release() },
+                modifier = playerModifier,
+            )
+        }
 
         Spacer(Modifier.height(16.dp))
 

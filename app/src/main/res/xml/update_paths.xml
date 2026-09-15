@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  내려받은 APK를 패키지 설치 화면에 넘기기 위한 경로.
+  앱 전용 외부 저장소의 Download 폴더만 연다 — 다른 경로를 열 이유가 없다.
+-->
+<paths>
+    <external-files-path name="updates" path="Download/" />
+</paths>

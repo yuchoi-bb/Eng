@@ -34,6 +34,10 @@ public data class AppState(
     val dailyLogs: Map<LocalDate, DailySpeechLog> = emptyMap(),
     /** `videoPlanId → content:// URI`. **기기 로컬 전용 — 절대 동기화하지 않는다.** */
     val localMediaUris: Map<String, String> = emptyMap(),
+    /** 마지막으로 새 버전을 확인한 시각. 기기마다 다르므로 동기화 대상이 아니다. */
+    val lastUpdateCheckEpochMs: Long? = null,
+    /** 사용자가 건너뛴 버전. 그 다음 버전이 나오면 다시 묻는다. */
+    val skippedUpdateVersion: String? = null,
 ) {
     public companion object {
         public const val SCHEMA_VERSION: Int = 1
