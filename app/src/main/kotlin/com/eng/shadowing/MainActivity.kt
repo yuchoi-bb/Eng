@@ -43,7 +43,13 @@ public class MainActivity : ComponentActivity() {
         handleShare(intent)
     }
 
-    /** REQUIREMENTS §9.1 — ACTION_SEND 리시버. S0는 video/*만 받는다. */
+    /**
+     * REQUIREMENTS §9.1 — ACTION_SEND 리시버. S0는 영상 MIME 타입만 받는다.
+     *
+     * 주의: Kotlin은 블록 주석이 **중첩된다.** 여기에 MIME 와일드카드를 그대로 적으면
+     * 슬래시와 별표가 중첩 주석을 열어 버리고, 줄 끝의 닫는 표시가 그 안쪽을 닫는 바람에
+     * 바깥 주석이 파일 끝까지 열린 채로 남는다. 실제로 그렇게 깨졌었다.
+     */
     private fun handleShare(intent: Intent?) {
         if (intent?.action != Intent.ACTION_SEND) return
         if (intent.type?.startsWith("video/") != true) return
