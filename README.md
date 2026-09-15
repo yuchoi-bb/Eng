@@ -31,6 +31,23 @@ Android (Kotlin / Jetpack Compose), 개인용 내부 테스트 트랙 배포.
 | [docs/FIRESTORE_SCHEMA.md](docs/FIRESTORE_SCHEMA.md) | Firestore 스키마 및 보안 규칙 (O-6) — 컬렉션 배치, 충돌 병합 전략, 비용 |
 | [docs/RECOMMENDATION_POOL.md](docs/RECOMMENDATION_POOL.md) | 추천 풀 운영 정책 (O-1, O-5) — 채널 선정 기준, 배치 주기, 보관 기간 |
 
+## 설치 (APK)
+
+[Releases](../../releases)에서 APK를 내려받아 기기에 설치합니다.
+새 릴리즈는 태그를 밀거나 Actions 탭의 `release` 워크플로를 수동 실행하면 만들어집니다.
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+APK는 레포의 **고정 디버그 키스토어**(`app/debug.keystore`)로 서명됩니다. 비밀번호가
+공개된 표준 안드로이드 디버그 자격증명이라 비밀이 아니며, 사이드로드 설치 전용입니다.
+고정해 두는 이유는 서명이 빌드마다 바뀌면 덮어쓰기 설치가 막혀
+(`INSTALL_FAILED_UPDATE_INCOMPATIBLE`) 앱을 지웠다 깔아야 하고, 그때 학습 기록이
+함께 사라지기 때문입니다.
+
+> Play Store 업로드에는 쓸 수 없습니다. 스토어 배포는 S1에서 별도 업로드 키로 진행합니다.
+
 ## 설정 파일
 
 | 파일 | 배포 |
