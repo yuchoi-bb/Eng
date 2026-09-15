@@ -188,8 +188,18 @@ TRANSCRIPTION_SCHEMA §3.2를 그대로 옮긴다. **검증(§4.2 V-1~V-9)을 �
   "sentenceIndex": 0,
   "clearedStage": 2,              // 0~3, §7.2 쉐도잉 3단계
   "totalCounts": 14,              // increment — 3단계 완주 횟수
-  "lastScore": 67,                // L2 키워드 부분 점수
+
+  // L2 — 온디바이스, 매 발화 동기 판정
+  "lastScore": 67,                // 키워드 부분 점수
   "bestScore": 100,               // max() 병합
+
+  // L3 — Azure, 비동기 도착 (REQUIREMENTS §6.3)
+  "lastPronScore": 72,            // 종합 발음 점수
+  "lastPronDetail": {             // 화면 표시용 세부 점수
+    "accuracy": 78, "fluency": 65, "completeness": 100, "prosody": 61
+  },
+  "bestPronScore": 81,            // max() 병합 — F-9 성장 지표
+  "pronScoredAt": "<timestamp>",
   "firstRecordingPath": "users/{uid}/firstRecordings/YT_dQw4w9WgXcQ_s0.m4a",
   "firstRecordingAt": "<timestamp>",
   "lastPracticedAt": "<timestamp>"
@@ -200,6 +210,12 @@ TRANSCRIPTION_SCHEMA §3.2를 그대로 옮긴다. **검증(§4.2 V-1~V-9)을 �
 > §9.1.1에서 동기화되는 유일한 녹음이 이것이기 때문이다. 로컬 `file://` 경로를 넣으면
 > 다른 태블릿에서 F-9(성장 기록) 비교 재생이 깨진다.
 > §4.5의 "최근 3회분" 순환 녹음은 **Firestore에 전혀 등장하지 않는다** (기기 로컬 전용).
+
+> **L3 점수는 비동기로 도착한다.** 세션 중 L2가 먼저 `lastScore`를 쓰고, Azure 응답이
+> 돌아오면 `lastPronScore`가 나중에 채워진다. 두 필드는 서로 다른 시점에 갱신되므로
+> **한 번의 `set()`으로 함께 쓰지 않는다** — L3 응답이 늦게 도착해 그 사이 진행된
+> L2 결과를 덮어쓰는 사고를 막기 위해, 각각 `update()`로 자기 필드만 건드린다.
+> L3에 보낸 녹음 자체는 프록시를 통과만 하고 어디에도 저장하지 않는다.
 
 ### 3.5 `users/{uid}/reviewQueue/{sentenceId}` — F-6
 
