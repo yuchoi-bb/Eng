@@ -1,5 +1,6 @@
 package com.eng.shadowing.core.model
 
+import kotlinx.serialization.Serializable
 /**
  * 한 영상의 학습 계획. REQUIREMENTS §9.3 + §10.1의 확정 사항을 반영한다.
  *
@@ -7,6 +8,7 @@ package com.eng.shadowing.core.model
  * 그 기기의 그 설치본에만 유효하므로 기기 로컬 저장소가 들고 있어야 한다
  * (REQUIREMENTS §10.1, FIRESTORE_SCHEMA §3.3).
  */
+@Serializable
 public data class VideoPlan(
     val id: VideoPlanId,
     val transcript: Transcript,
@@ -27,6 +29,7 @@ public data class VideoPlan(
  * 영상 계획 ID. `sourceRef`에서 결정적으로 파생되므로 중복 등록이 구조적으로 막힌다
  * — FIRESTORE_SCHEMA §1.2.
  */
+@Serializable
 @JvmInline
 public value class VideoPlanId(public val value: String) {
     override fun toString(): String = value
@@ -46,6 +49,7 @@ public value class VideoPlanId(public val value: String) {
  * 문장 식별자. 복습 큐와 문장 진행도가 같은 키를 공유해 조인이 필요 없다
  * — FIRESTORE_SCHEMA §1.2.
  */
+@Serializable
 @JvmInline
 public value class SentenceId(public val value: String) {
     override fun toString(): String = value

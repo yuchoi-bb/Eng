@@ -1,6 +1,8 @@
 package com.eng.shadowing.core.daily
 
 import com.eng.shadowing.core.budget.BudgetAdaptation
+import com.eng.shadowing.core.store.LocalDateSerializer
+import kotlinx.serialization.Serializable
 import java.time.LocalDate
 
 /**
@@ -10,7 +12,9 @@ import java.time.LocalDate
  * 예산을 바꾼 순간 과거 완료율이 소급해서 틀려지고, 그 완료율을 다시 입력으로 쓰므로
  * 되먹임이 오염된다.
  */
+@Serializable
 public data class DailySpeechLog(
+    @Serializable(with = LocalDateSerializer::class)
     val date: LocalDate,
     val dailyTargetSec: Int,
     val achievedSec: Int = 0,

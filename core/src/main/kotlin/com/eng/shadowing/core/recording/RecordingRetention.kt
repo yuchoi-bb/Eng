@@ -1,6 +1,8 @@
 package com.eng.shadowing.core.recording
 
+import kotlinx.serialization.Serializable
 /** 한 문장에 속한 녹음 하나. `path`는 기기 로컬 경로다. */
+@Serializable
 public data class RecordingRef(
     val path: String,
     val recordedAtEpochMs: Long,

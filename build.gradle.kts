@@ -1,3 +1,5 @@
-plugins {
-    alias(libs.plugins.kotlin.jvm) apply false
-}
+// 루트는 비워 둔다.
+//
+// Android 플러그인을 여기서 `apply false`로 선언하면, :app이 포함되지 않은 환경에서도
+// Gradle이 AGP를 해석하려 들어 :core 빌드까지 실패한다. 버전은 이미 버전 카탈로그가
+// 들고 있으므로 각 모듈이 alias로 직접 선언하면 충분하다.
