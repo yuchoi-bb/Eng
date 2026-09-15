@@ -21,7 +21,22 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - uses: android-actions/setup-android@v3
+      # android-actions/setup-android@v3은 더 이상 존재하지 않는 'tools' 패키지를
+      # 설치하려다 실패한다. 러너 이미지에 SDK가 이미 들어 있으므로 직접 준비한다.
+      - name: Android SDK 준비
+        env:
+          COMPILE_SDK: "35"
+        run: |
+          set -euo pipefail
+          echo "ANDROID_HOME=${ANDROID_HOME:-(비어 있음)}"
+          echo "설치된 플랫폼:"
+          ls "$ANDROID_HOME/platforms" 2>/dev/null || echo "  (없음)"
+          if [ ! -d "$ANDROID_HOME/platforms/android-$COMPILE_SDK" ]; then
+            sdkmanager=$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f | head -1)
+            echo "android-$COMPILE_SDK 이 없어 설치합니다 ($sdkmanager)"
+            yes | "$sdkmanager" --licenses >/dev/null 2>&1 || true
+            "$sdkmanager" "platforms;android-$COMPILE_SDK"
+          fi
 
       - uses: gradle/actions/setup-gradle@v4
 
