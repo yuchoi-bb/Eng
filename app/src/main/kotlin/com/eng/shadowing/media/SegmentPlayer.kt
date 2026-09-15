@@ -2,8 +2,10 @@ package com.eng.shadowing.media
 
 import android.content.Context
 import android.net.Uri
+import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import com.eng.shadowing.core.playback.PlaybackSegment
 
@@ -13,6 +15,7 @@ import com.eng.shadowing.core.playback.PlaybackSegment
  * 폴링으로 `currentPosition`을 감시하면 프레임 간격만큼 늦게 멈춰 문장 끝이 다음 문장을 물고
  * 들어온다. 클리핑을 걸면 플레이어가 정확한 지점에서 `STATE_ENDED`를 준다.
  */
+@OptIn(UnstableApi::class)
 public class SegmentPlayer(context: Context) {
 
     public val player: ExoPlayer = ExoPlayer.Builder(context).build()

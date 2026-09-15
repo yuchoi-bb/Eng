@@ -5,6 +5,8 @@ import android.net.Uri
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
+import androidx.annotation.OptIn
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import com.eng.shadowing.core.model.Sentence
 import com.eng.shadowing.core.model.SentenceId
@@ -42,6 +44,7 @@ internal data class SessionUiState(
  * 연결하기만 한다 — 카운트 규칙이 UI에 스며들면 §7.2의 "3단계 완주 = 1카운트"가
  * 화면마다 달라진다.
  */
+@OptIn(UnstableApi::class)
 internal class SessionController(
     context: Context,
     private val plan: VideoPlan,

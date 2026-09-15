@@ -30,7 +30,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.annotation.OptIn
 import androidx.core.content.ContextCompat
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
 import com.eng.shadowing.core.model.VideoPlan
 import com.eng.shadowing.core.session.ShadowingStage
@@ -42,6 +44,7 @@ import com.eng.shadowing.ui.ProgressBar
  * 탭이 필요 없는 무한 루프다. 사용자가 누르는 버튼은 "이번 발화 끝" 하나뿐이고,
  * 나머지는 재생 종료와 녹음 종료가 스스로 다음 회차를 부른다.
  */
+@OptIn(UnstableApi::class)
 @Composable
 internal fun SessionScreen(
     plan: VideoPlan,
