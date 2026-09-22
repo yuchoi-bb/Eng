@@ -108,7 +108,9 @@ internal fun SessionScreen(
         // 두 소스가 서로 다른 재생기를 쓴다. 뷰가 만들어진 뒤에야 재생기를 붙일 수 있으므로
         // factory 안에서 컨트롤러에 연결한다 — §F-1은 유튜브를 공식 임베드로만 재생하게 한다.
         val playerModifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
-        when (source.takeIf { options.sourceAudioAvailable }) {
+        // when의 대상이 표현식이면 각 분기에서 스마트 캐스트가 되지 않는다. 지역 val로 받는다.
+        val activeSource = source.takeIf { options.sourceAudioAvailable }
+        when (activeSource) {
             // 원본이 없는 세션(오프라인 복습, 현장 메모 연습)은 재생할 것이 없다.
             null -> Text(
                 if (options.sourceAudioAvailable) "" else "원본 없이 복습합니다",
@@ -117,27 +119,34 @@ internal fun SessionScreen(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
             )
 
-            is SessionSource.Upload -> AndroidView(
-                factory = { viewContext ->
-                    val playback = SegmentPlayer(viewContext).apply { mediaUri = source.uri }
-                    controller.attachSource(playback)
-                    PlayerView(viewContext).apply {
-                        useController = false
-                        player = playback.player
-                    }
-                },
-                modifier = playerModifier,
-            )
+            is SessionSource.Upload -> {
+                // 람다 안으로 스마트 캐스트를 끌고 들어가지 않는다. 값을 먼저 꺼내 둔다.
+                val mediaUri = activeSource.uri
+                AndroidView(
+                    factory = { viewContext ->
+                        val playback = SegmentPlayer(viewContext).apply { this.mediaUri = mediaUri }
+                        controller.attachSource(playback)
+                        PlayerView(viewContext).apply {
+                            useController = false
+                            player = playback.player
+                        }
+                    },
+                    modifier = playerModifier,
+                )
+            }
 
-            is SessionSource.YouTube -> AndroidView(
-                factory = { viewContext ->
-                    YouTubePlayerView(viewContext).also { view ->
-                        controller.attachSource(YouTubeSourcePlayback(view, source.videoId))
-                    }
-                },
-                onRelease = { view -> view.release() },
-                modifier = playerModifier,
-            )
+            is SessionSource.YouTube -> {
+                val videoId = activeSource.videoId
+                AndroidView(
+                    factory = { viewContext ->
+                        YouTubePlayerView(viewContext).also { view ->
+                            controller.attachSource(YouTubeSourcePlayback(view, videoId))
+                        }
+                    },
+                    onRelease = { view -> view.release() },
+                    modifier = playerModifier,
+                )
+            }
         }
 
         Spacer(Modifier.height(16.dp))
@@ -230,5 +239,5 @@ private fun stageLabel(stage: ShadowingStage, options: SessionOptions): String {
         ShadowingStage.SHADOW_WITH_TEXT -> if (whisper) "보면서 입모양으로" else "보면서 따라 말하기"
         ShadowingStage.SHADOW_NO_TEXT -> if (whisper) "자막 끄고 입모양으로" else "자막 끄고 따라 말하기"
     }
-    return "$step/$total단계 · $action"
+    return "$step/${total}단계 · $action"
 }

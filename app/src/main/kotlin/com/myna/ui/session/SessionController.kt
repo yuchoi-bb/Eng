@@ -19,7 +19,7 @@ import com.myna.media.SourcePlayback
 import java.io.File
 
 internal data class SessionUiState(
-    val stage: ShadowingStage = ShadowingStage.FIRST,
+    val stage: ShadowingStage = ShadowingStage.SHADOW_WITH_TEXT,
     val sentenceText: String = "",
     val translationKo: String = "",
     val transliterationKo: String? = null,
@@ -30,6 +30,8 @@ internal data class SessionUiState(
     val targetCounts: Int = 0,
     val remainingCounts: Int = 0,
     val finished: Boolean = false,
+    /** 방금 완주한 문장의 번호. 오프라인 복습 대상 판정에 쓰인다. */
+    val clearedSentenceIndex: Int? = null,
 ) {
     val progressFraction: Float
         get() = if (targetCounts == 0) 0f else completedCounts.toFloat() / targetCounts
