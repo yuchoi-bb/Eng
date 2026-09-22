@@ -13,6 +13,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -28,8 +29,12 @@ internal fun HomeScreen(
     state: AppState,
     today: DailySpeechLog,
     streak: Int,
+    online: Boolean,
+    noteCount: Int,
     onAddVideo: () -> Unit,
     onOpenPlan: (String) -> Unit,
+    onCaptureNote: () -> Unit,
+    onOpenNotes: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize().padding(20.dp)) {
         Text("오늘", style = MaterialTheme.typography.headlineSmall)
@@ -46,8 +51,26 @@ internal fun HomeScreen(
         if (streak > 0) {
             Text("연속 $streak 일", modifier = Modifier.padding(top = 12.dp))
         }
+        if (!online) {
+            // 유튜브는 임베드 재생이라 회선 없이는 원본을 들려줄 수 없다.
+            Text(
+                "오프라인입니다. 이미 들어 본 문장만 복습할 수 있어요.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(20.dp))
+        // 현장에서 막혔을 때 30초 안에 끝나야 한다. 그래서 홈 첫 화면에 둔다.
+        Button(onClick = onCaptureNote, modifier = Modifier.fillMaxWidth()) {
+            Text("지금 막혔어요")
+        }
+        TextButton(onClick = onOpenNotes, modifier = Modifier.fillMaxWidth()) {
+            Text(if (noteCount > 0) "막힌 순간들 · 채울 것 ${noteCount}개" else "막힌 순간들")
+        }
+
+        Spacer(Modifier.height(8.dp))
         Button(onClick = onAddVideo, modifier = Modifier.fillMaxWidth()) {
             Text("영상 추가하기")
         }

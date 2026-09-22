@@ -11,6 +11,7 @@ import com.myna.core.playback.SegmentPadding
 import com.myna.core.session.PracticeUnit
 import com.myna.core.session.SessionEngine
 import com.myna.core.session.SessionEvent
+import com.myna.core.session.SessionOptions
 import com.myna.core.session.ShadowingStage
 import com.myna.media.RecordingPlayer
 import com.myna.media.SentenceRecorder
@@ -45,10 +46,11 @@ internal class SessionController(
     context: Context,
     private val plan: VideoPlan,
     private val playbackRate: Float,
+    private val options: SessionOptions = SessionOptions(),
 ) {
     private val recorder = SentenceRecorder(context)
     private val recordingPlayer = RecordingPlayer()
-    private val engine = SessionEngine(plan)
+    private val engine = SessionEngine(plan, options)
 
     /**
      * 원본 재생기. 화면이 뷰를 만든 뒤에 붙인다 — 업로드는 ExoPlayer, 유튜브는
@@ -72,7 +74,9 @@ internal class SessionController(
     }
 
     fun start() {
-        if (started || source == null) return
+        // 원본이 없는 세션(오프라인 복습, 현장 메모 연습)은 재생기를 기다리지 않는다.
+        if (started) return
+        if (options.sourceAudioAvailable && source == null) return
         started = true
         beginStage()
     }
@@ -94,14 +98,27 @@ internal class SessionController(
         isRecording = false
         _uiState.value = snapshot()
 
+        if (!options.sourceAudioAvailable) {
+            // 들려줄 원본이 없다. 자막을 띄운 채로 사용자가 말하기를 기다린다.
+            if (engine.requiresRecording) startRecording(step.sentenceIndex) else waitForUser()
+            return
+        }
+
         source?.playSegment(segment, playbackRate) {
-            if (engine.requiresRecording) {
-                startRecording(step.sentenceIndex)
-            } else {
-                // 1단계 듣기만 — 재생이 끝나면 바로 다음 단계로.
-                advance()
+            when {
+                engine.requiresRecording -> startRecording(step.sentenceIndex)
+                // 듣기 단계 — 재생이 끝나면 바로 다음 단계로.
+                !engine.currentStage.isSpeaking -> advance()
+                // 무음 모드의 말하기 단계 — 녹음하지 않고 사용자가 끝냈다고 알려 주길 기다린다.
+                else -> waitForUser()
             }
         }
+    }
+
+    /** 녹음이 없는 단계에서 "말하기 끝" 버튼을 띄운다. */
+    private fun waitForUser() {
+        isRecording = true
+        _uiState.value = snapshot()
     }
 
     /** `type=SINGLE`의 호흡 조각은 문장 전체가 아니라 그 조각만 재생한다 — §4.4. */
@@ -133,21 +150,31 @@ internal class SessionController(
      */
     fun finishRecording() {
         val step = engine.currentStep ?: return
-        recorder.stop(SentenceId.of(plan.id, step.sentenceIndex).value)
+        // 무음 모드에서는 애초에 녹음을 시작하지 않았으므로 멈출 것도 없다.
+        if (options.recordsVoice) {
+            recorder.stop(SentenceId.of(plan.id, step.sentenceIndex).value)
+        }
         isRecording = false
         advance()
     }
 
     private fun advance() {
-        when (engine.completeStage()) {
+        when (val event = engine.completeStage()) {
             is SessionEvent.SessionFinished -> _uiState.value = snapshot().copy(finished = true)
-            else -> if (engine.isFinished) {
-                _uiState.value = snapshot().copy(finished = true)
-            } else {
-                beginStage()
+            else -> {
+                if (event is SessionEvent.CountCompleted) {
+                    lastClearedSentenceIndex = event.sentenceIndex
+                }
+                if (engine.isFinished) {
+                    _uiState.value = snapshot().copy(finished = true)
+                } else {
+                    beginStage()
+                }
             }
         }
     }
+
+    private var lastClearedSentenceIndex: Int? = null
 
     /** L1 — 원본 구간을 들려준 뒤 방금 내 녹음을 이어서 재생한다. */
     fun playbackComparison() {
@@ -188,6 +215,7 @@ internal class SessionController(
             targetCounts = engine.targetCounts,
             remainingCounts = engine.remainingCounts,
             finished = engine.isFinished,
+            clearedSentenceIndex = lastClearedSentenceIndex,
         )
     }
 }

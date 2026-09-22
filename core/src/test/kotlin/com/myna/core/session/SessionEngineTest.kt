@@ -18,6 +18,7 @@ class SessionEngineTest {
     fun `3단계를 모두 통과해야 카운트가 1 오른다`() {
         // §7.2 — 이 규칙이 반복 횟수의 질을 결정한다.
         val engine = SessionEngine(plan(targetReps = 1))
+        assertEquals(3, engine.stagesPerCount)
 
         assertEquals(ShadowingStage.LISTEN, engine.currentStage)
         assertEquals(0, engine.completedCounts)
@@ -81,7 +82,7 @@ class SessionEngineTest {
         assertEquals(3, engine.targetCounts) // 조각 2개는 빠진다
 
         // 첫 걸음은 호흡 조각이다.
-        repeat(ShadowingStage.COUNT - 1) { engine.completeStage() }
+        repeat(engine.stagesPerCount - 1) { engine.completeStage() }
         assertIs<SessionEvent.BreathGroupCompleted>(engine.completeStage())
         assertEquals(0, engine.completedCounts)
     }
@@ -130,14 +131,14 @@ class SessionEngineTest {
         val engine = SessionEngine(plan(targetReps = 3))
         assertEquals(3, engine.remainingCounts)
 
-        repeat(ShadowingStage.COUNT) { engine.completeStage() }
+        repeat(engine.stagesPerCount) { engine.completeStage() }
         assertEquals(2, engine.remainingCounts)
     }
 
     @Test
     fun `모든 걸음을 끝내면 세션이 종료된다`() {
         val engine = SessionEngine(plan(targetReps = 2))
-        repeat(ShadowingStage.COUNT * 2) { engine.completeStage() }
+        repeat(engine.stagesPerCount * 2) { engine.completeStage() }
 
         assertTrue(engine.isFinished)
         assertEquals(2, engine.completedCounts)

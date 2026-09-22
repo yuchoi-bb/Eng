@@ -39,6 +39,7 @@ public value class VideoPlanId(public val value: String) {
             val prefix = when (source) {
                 VideoSource.YOUTUBE -> "YT"
                 VideoSource.UPLOAD -> "UP"
+                VideoSource.NOTE -> "NT"
             }
             return VideoPlanId("${prefix}_$sourceRef")
         }

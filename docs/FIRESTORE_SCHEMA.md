@@ -34,7 +34,7 @@ meta/channels/state/{channelId}          배치 커서 (앱 접근 없음)
 | 컬렉션 | 문서 ID | 이유 |
 |---|---|---|
 | `dailyLogs` | `yyyy-MM-dd` | REQUIREMENTS §4.6 — 자정 롤오버 작업 없이 **조회 시점에 `LocalDate` 키로 판정**. ISO 형식이라 문서 ID의 사전순 = 시간순 → F-5 스트릭을 `orderBy(documentId(), DESC).limit(30)` 한 번으로 계산 |
-| `videoPlans` | `YT_<videoId>` / `UP_<uuid>` | TRANSCRIPTION_SCHEMA §3.1 — `sourceRef` 중복 등록 방지. 결정적 ID라 별도 중복 검사 쿼리가 필요 없다 (`set(merge)` 재요청 = 캐시 갱신) |
+| `videoPlans` | `YT_<videoId>` / `UP_<uuid>` / `NT_<noteId>` | TRANSCRIPTION_SCHEMA §3.1 — `sourceRef` 중복 등록 방지. 결정적 ID라 별도 중복 검사 쿼리가 필요 없다 (`set(merge)` 재요청 = 캐시 갱신). `NT_`는 현장 메모에서 만든 문장 연습이다 |
 | `sentences` | 3자리 제로패딩 `000` | Firestore는 문서 ID를 **사전순**으로 정렬한다. 패딩 없이 `"10" < "2"`가 되어 문장 순서가 깨진다 |
 | `sentenceProgress` / `reviewQueue` | `<videoPlanId>_s<index>` | 두 컬렉션이 같은 문장을 가리키므로 ID를 공유한다 (조인 불필요) |
 | `expressions` | lemma 정규화 (소문자, 공백→`_`) | `be up to` → `be_up_to`. 누적 카운트가 자연스럽게 병합됨 |
@@ -123,7 +123,7 @@ TRANSCRIPTION_SCHEMA §6의 권고를 따른다. 근거는 두 가지다.
 {
   "schemaVersion": 1,
   // --- 전사 응답에서 그대로 (LLM 영역) ---
-  "source": "YOUTUBE",           // YOUTUBE | UPLOAD
+  "source": "YOUTUBE",           // YOUTUBE | UPLOAD | NOTE
   "sourceRef": "dQw4w9WgXcQ",
   "language": "en",
   "type": "DIALOGUE",            // DRILL | SINGLE | DIALOGUE

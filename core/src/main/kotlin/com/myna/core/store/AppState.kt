@@ -2,6 +2,7 @@ package com.myna.core.store
 
 import com.myna.core.daily.DailySpeechLog
 import com.myna.core.model.UserSettings
+import com.myna.core.notes.FieldNote
 import com.myna.core.model.VideoPlan
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
@@ -38,6 +39,13 @@ public data class AppState(
     val lastUpdateCheckEpochMs: Long? = null,
     /** 사용자가 건너뛴 버전. 그 다음 버전이 나오면 다시 묻는다. */
     val skippedUpdateVersion: String? = null,
+    /** 현장에서 막힌 순간의 기록. 최신이 앞. */
+    val fieldNotes: List<FieldNote> = emptyList(),
+    /**
+     * 한 번 이상 완주한 문장. 오프라인에서 연습할 수 있는지 판단하는 기준이다
+     * ([com.myna.core.offline.OfflineReadiness]).
+     */
+    val clearedSentenceIds: Set<String> = emptySet(),
 ) {
     public companion object {
         public const val SCHEMA_VERSION: Int = 1

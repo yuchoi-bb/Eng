@@ -3,7 +3,11 @@ package com.myna.data
 import com.myna.core.daily.DailyProgress
 import com.myna.core.daily.DailySpeechLog
 import com.myna.core.model.UserSettings
+import com.myna.core.model.SentenceId
 import com.myna.core.model.VideoPlan
+import com.myna.core.notes.FieldNote
+import com.myna.core.notes.NoteSituation
+import com.myna.core.notes.NotePractice
 import com.myna.core.store.AppState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -53,6 +57,62 @@ public class ShadowingRepository(private val store: LocalStore) {
 
     public fun skipUpdateVersion(version: String) {
         mutate { it.copy(skippedUpdateVersion = version) }
+    }
+
+    // ---------- 현장 메모 ----------
+
+    /**
+     * 막힌 순간을 기록한다. 한국어 한 줄이면 충분하다 —
+     * 영어로 적을 수 있었다면 애초에 막히지 않았다.
+     */
+    public fun addFieldNote(koreanMemo: String, situation: NoteSituation, nowEpochMs: Long): FieldNote {
+        val note = FieldNote(
+            id = "n${nowEpochMs}_${_state.value.fieldNotes.size}",
+            koreanMemo = koreanMemo.trim(),
+            situation = situation,
+            createdAtEpochMs = nowEpochMs,
+        )
+        mutate { it.copy(fieldNotes = listOf(note) + it.fieldNotes) }
+        return note
+    }
+
+    /**
+     * 영어 문장을 채워 연습 대상으로 만든다.
+     *
+     * 계획까지 함께 만들어 저장하므로, 채우는 즉시 다른 영상과 똑같이 세션을 돌릴 수 있다.
+     */
+    public fun resolveFieldNote(noteId: String, englishText: String, nowEpochMs: Long): VideoPlan? {
+        val note = _state.value.fieldNotes.firstOrNull { it.id == noteId } ?: return null
+        val filled = note.copy(englishText = englishText.trim(), resolvedAtEpochMs = nowEpochMs)
+        val plan = NotePractice.toPlan(filled, _state.value.settings.dailyTargetSec) ?: return null
+
+        mutate { current ->
+            current.copy(
+                fieldNotes = current.fieldNotes.map {
+                    if (it.id == noteId) filled.copy(practicePlanId = plan.id.value) else it
+                },
+                plans = current.plans + (plan.id.value to plan),
+            )
+        }
+        return plan
+    }
+
+    public fun deleteFieldNote(noteId: String) {
+        mutate { it.copy(fieldNotes = it.fieldNotes.filterNot { note -> note.id == noteId }) }
+    }
+
+    // ---------- 오프라인 판정 ----------
+
+    /**
+     * 한 번 이상 완주한 문장으로 기록한다. 오프라인에서 무엇을 연습할 수 있는지가 여기서 나온다.
+     */
+    public fun markSentenceCleared(planId: String, sentenceIndex: Int) {
+        val id = SentenceId.of(
+            _state.value.plans[planId]?.id ?: return,
+            sentenceIndex,
+        ).value
+        if (id in _state.value.clearedSentenceIds) return
+        mutate { it.copy(clearedSentenceIds = it.clearedSentenceIds + id) }
     }
 
     public fun today(date: LocalDate): DailySpeechLog =

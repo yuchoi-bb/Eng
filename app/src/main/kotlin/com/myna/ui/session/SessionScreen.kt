@@ -34,7 +34,9 @@ import androidx.core.content.ContextCompat
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
 import com.myna.core.model.VideoPlan
+import com.myna.core.session.SessionOptions
 import com.myna.core.session.ShadowingStage
+import com.myna.core.session.VoiceMode
 import com.myna.media.SegmentPlayer
 import com.myna.media.YouTubeSourcePlayback
 import com.myna.ui.ProgressBar
@@ -50,14 +52,16 @@ import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.views.YouTube
 @Composable
 internal fun SessionScreen(
     plan: VideoPlan,
-    source: SessionSource,
+    source: SessionSource?,
+    options: SessionOptions,
     playbackRate: Float,
     showTransliteration: Boolean,
     onKeepScreenOn: (Boolean) -> Unit,
+    onSentenceCleared: (sentenceIndex: Int) -> Unit,
     onFinished: (achievedSec: Int, counts: Int) -> Unit,
 ) {
     val context = LocalContext.current
-    val controller = remember(plan.id.value) { SessionController(context, plan, playbackRate) }
+    val controller = remember(plan.id.value) { SessionController(context, plan, playbackRate, options) }
     val ui by controller.uiState
 
     var permissionGranted by remember {
@@ -83,11 +87,17 @@ internal fun SessionScreen(
     }
 
     LaunchedEffect(permissionGranted) {
-        if (permissionGranted) {
-            controller.start()
-        } else {
-            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        when {
+            // 무음 모드는 녹음하지 않으므로 마이크 권한을 묻지 않는다.
+            !options.recordsVoice -> controller.start()
+            permissionGranted -> controller.start()
+            else -> permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
+    }
+
+    // 한 문장을 완주할 때마다 알린다. 오프라인에서 무엇을 복습할 수 있는지가 여기서 정해진다.
+    LaunchedEffect(ui.clearedSentenceIndex) {
+        ui.clearedSentenceIndex?.let(onSentenceCleared)
     }
 
     LaunchedEffect(ui.finished) {
@@ -98,7 +108,15 @@ internal fun SessionScreen(
         // 두 소스가 서로 다른 재생기를 쓴다. 뷰가 만들어진 뒤에야 재생기를 붙일 수 있으므로
         // factory 안에서 컨트롤러에 연결한다 — §F-1은 유튜브를 공식 임베드로만 재생하게 한다.
         val playerModifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
-        when (source) {
+        when (source.takeIf { options.sourceAudioAvailable }) {
+            // 원본이 없는 세션(오프라인 복습, 현장 메모 연습)은 재생할 것이 없다.
+            null -> Text(
+                if (options.sourceAudioAvailable) "" else "원본 없이 복습합니다",
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+            )
+
             is SessionSource.Upload -> AndroidView(
                 factory = { viewContext ->
                     val playback = SegmentPlayer(viewContext).apply { mediaUri = source.uri }
@@ -133,7 +151,7 @@ internal fun SessionScreen(
         )
 
         Spacer(Modifier.height(20.dp))
-        Text(stageLabel(ui.stage), style = MaterialTheme.typography.titleMedium)
+        Text(stageLabel(ui.stage, options), style = MaterialTheme.typography.titleMedium)
 
         Spacer(Modifier.height(12.dp))
         Box(Modifier.fillMaxWidth().height(140.dp), contentAlignment = Alignment.Center) {
@@ -177,7 +195,7 @@ internal fun SessionScreen(
 
         if (ui.recording) {
             Button(onClick = { controller.finishRecording() }, modifier = Modifier.fillMaxWidth()) {
-                Text("말하기 끝")
+                Text(if (options.voiceMode == VoiceMode.WHISPER) "다음" else "말하기 끝")
             }
         } else {
             Text(
@@ -203,8 +221,14 @@ internal fun SessionScreen(
     }
 }
 
-private fun stageLabel(stage: ShadowingStage): String = when (stage) {
-    ShadowingStage.LISTEN -> "1단계 · 듣기만"
-    ShadowingStage.SHADOW_WITH_TEXT -> "2단계 · 보면서 따라 말하기"
-    ShadowingStage.SHADOW_NO_TEXT -> "3단계 · 자막 끄고 따라 말하기"
+private fun stageLabel(stage: ShadowingStage, options: SessionOptions): String {
+    val step = options.stages.indexOf(stage) + 1
+    val total = options.stages.size
+    val whisper = options.voiceMode == VoiceMode.WHISPER
+    val action = when (stage) {
+        ShadowingStage.LISTEN -> "듣기만"
+        ShadowingStage.SHADOW_WITH_TEXT -> if (whisper) "보면서 입모양으로" else "보면서 따라 말하기"
+        ShadowingStage.SHADOW_NO_TEXT -> if (whisper) "자막 끄고 입모양으로" else "자막 끄고 따라 말하기"
+    }
+    return "$step/$total단계 · $action"
 }

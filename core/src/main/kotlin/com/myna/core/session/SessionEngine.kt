@@ -29,10 +29,14 @@ public sealed interface SessionEvent {
  */
 public class SessionEngine(
     private val plan: VideoPlan,
+    private val options: SessionOptions = SessionOptions(),
     private val steps: List<SessionStep> = SessionPlan.expand(plan),
 ) {
     private var stepCursor: Int = 0
-    private var stage: ShadowingStage = ShadowingStage.FIRST
+    private var stageIndex: Int = 0
+
+    /** 1카운트를 구성하는 단계 수. 원본을 들을 수 없으면 듣기가 빠져 하나 줄어든다. */
+    public val stagesPerCount: Int = options.stages.size
 
     public var completedCounts: Int = 0
         private set
@@ -53,7 +57,7 @@ public class SessionEngine(
 
     public val currentStep: SessionStep? get() = steps.getOrNull(stepCursor)
 
-    public val currentStage: ShadowingStage get() = stage
+    public val currentStage: ShadowingStage get() = options.stages[stageIndex]
 
     public val currentSentence: Sentence?
         get() = currentStep?.let { plan.sentences.getOrNull(it.sentenceIndex) }
@@ -63,10 +67,14 @@ public class SessionEngine(
 
     public val remainingCounts: Int get() = (targetCounts - completedCounts).coerceAtLeast(0)
 
-    /** §7.2 — 자막을 보여줄지. 3단계에서만 숨긴다. */
-    public val showsSubtitle: Boolean get() = stage.showsSubtitle
+    /** §7.2 — 자막을 보여줄지. 마지막 말하기 단계에서만 숨긴다. */
+    public val showsSubtitle: Boolean get() = currentStage.showsSubtitle
 
-    public val requiresRecording: Boolean get() = stage.requiresRecording
+    /** 무음 모드에서는 어느 단계에서도 마이크를 켜지 않는다. */
+    public val requiresRecording: Boolean get() = options.requiresRecording(currentStage)
+
+    /** 이 단계에서 원본을 재생해야 하는가. 들을 수 없는 자리에서는 아무것도 재생하지 않는다. */
+    public val playsSource: Boolean get() = options.sourceAudioAvailable
 
     /**
      * 현재 단계를 끝낸다. 듣기 단계는 재생이 끝났을 때, 말하기 단계는 녹음이 끝났을 때 부른다.
@@ -74,14 +82,13 @@ public class SessionEngine(
     public fun completeStage(): SessionEvent {
         val step = currentStep ?: return SessionEvent.SessionFinished
 
-        val nextStage = stage.next()
-        if (nextStage != null) {
-            stage = nextStage
-            return SessionEvent.StageAdvanced(nextStage)
+        if (stageIndex + 1 < options.stages.size) {
+            stageIndex += 1
+            return SessionEvent.StageAdvanced(currentStage)
         }
 
-        // 3단계 완주 — 한 걸음이 끝났다.
-        stage = ShadowingStage.FIRST
+        // 모든 단계 완주 — 한 걸음이 끝났다.
+        stageIndex = 0
         stepCursor += 1
 
         if (!step.countsTowardTarget) {

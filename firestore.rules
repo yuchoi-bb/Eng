@@ -71,7 +71,9 @@ service cloud.firestore {
 
         allow create: if isOwner(uid)
                       && validSchemaVersion()
-                      && incoming().source in ['YOUTUBE', 'UPLOAD']
+                      // NOTE는 현장 메모로 직접 적은 문장이다. 프록시를 거치지 않으므로
+                      // TRANSCRIPTION_SCHEMA의 source 목록 밖이지만 저장 대상이다.
+                      && incoming().source in ['YOUTUBE', 'UPLOAD', 'NOTE']
                       && incoming().type in ['DRILL', 'SINGLE', 'DIALOGUE']
                       && incoming().cefr in ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
                       && incoming().timestampUnit in ['SECOND', 'MILLISECOND']

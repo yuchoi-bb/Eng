@@ -52,8 +52,15 @@ public data class Expression(
     val meaningKo: String,
 )
 
+/**
+ * 문장이 어디서 왔는가.
+ *
+ * [YOUTUBE]와 [UPLOAD]는 TRANSCRIPTION_SCHEMA의 `source` 값 그대로다.
+ * [NOTE]는 그 스키마를 벗어난 로컬 전용 값이다 — 현장 메모로 직접 적은 문장은
+ * 프록시를 거치지 않으므로 응답 계약의 대상이 아니다.
+ */
 @Serializable
-public enum class VideoSource { YOUTUBE, UPLOAD }
+public enum class VideoSource { YOUTUBE, UPLOAD, NOTE }
 
 /** REQUIREMENTS §4.4 — 영상 유형별로 반복 방식이 달라진다. */
 @Serializable
