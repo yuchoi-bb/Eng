@@ -13,7 +13,7 @@ Android (Kotlin / Jetpack Compose), 개인용 내부 테스트 트랙 배포.
 | `app` | Compose UI, 녹음(MediaRecorder), 재생(ExoPlayer) | Android SDK 필요 |
 
 `core`에 계산을 몰아 둔 이유는 §9.4다 — 산술은 재현 가능해야 하므로 기기 없이 단위
-테스트로 검증되는 자리에 둔다. 현재 테스트 63개.
+테스트로 검증되는 자리에 둔다. 현재 테스트 82개.
 
 `settings.gradle.kts`가 Android SDK 부재를 감지하면 `:app`을 제외하므로, SDK 없는
 환경에서도 `:core` 테스트는 그대로 돌아간다.
