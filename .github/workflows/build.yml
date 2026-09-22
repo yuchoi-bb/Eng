@@ -58,6 +58,6 @@ jobs:
       - name: APK 업로드
         uses: actions/upload-artifact@v4
         with:
-          name: eng-shadowing-apk-${{ github.sha }}
+          name: myna-apk-${{ github.sha }}
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error

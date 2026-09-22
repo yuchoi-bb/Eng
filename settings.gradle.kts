@@ -1,4 +1,4 @@
-rootProject.name = "eng-shadowing"
+rootProject.name = "myna"
 
 pluginManagement {
     repositories {

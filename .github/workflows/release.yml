@@ -85,7 +85,7 @@ jobs:
             echo "APK를 찾지 못했습니다." >&2
             exit 1
           fi
-          out="eng-shadowing-${{ steps.tag.outputs.name }}.apk"
+          out="myna-${{ steps.tag.outputs.name }}.apk"
           cp "$src" "$out"
           echo "path=$out" >> "$GITHUB_OUTPUT"
           echo "sha256=$(sha256sum "$out" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"

@@ -22,11 +22,11 @@ plugins {
 }
 
 android {
-    namespace = "com.eng.shadowing"
+    namespace = "com.myna"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.eng.shadowing"
+        applicationId = "com.myna"
         minSdk = 26          // Photo Picker 백포트와 MediaExtractor 사용 범위
         targetSdk = 35
         versionCode = appVersionCode

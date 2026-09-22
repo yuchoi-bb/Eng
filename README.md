@@ -1,4 +1,4 @@
-# Eng — 영어 쉐도잉 앱
+# myna
 
 **유튜브 영어 쉐도잉 쇼츠를 기본 소재로, 내 발음과 학습 횟수를 카운트하는 앱.**
 Android (Kotlin / Jetpack Compose), 개인용 내부 테스트 트랙 배포.
