@@ -12,8 +12,11 @@ import com.myna.core.model.VideoSource
 import com.myna.core.notes.FieldNote
 import com.myna.core.offline.OfflineReadiness
 import com.myna.core.session.SessionOptions
+import com.myna.data.ApiKeyStore
 import com.myna.data.NetworkMonitor
 import com.myna.data.ShadowingRepository
+import com.myna.transcribe.GeminiTranscriber
+import com.myna.ui.settings.ApiKeyScreen
 import com.myna.ui.entry.ManualEntryScreen
 import com.myna.ui.home.HomeScreen
 import com.myna.ui.onboarding.OnboardingScreen
@@ -41,11 +44,13 @@ internal sealed interface Screen {
     data object CaptureNote : Screen
     data object NoteList : Screen
     data class ResolveNote(val noteId: String) : Screen
+    data object ApiKeySettings : Screen
 }
 
 @Composable
-public fun AppRoot(
+internal fun AppRoot(
     repository: ShadowingRepository,
+    apiKeys: ApiKeyStore,
     sharedVideoUri: Uri?,
     sharedYouTubeVideoId: String?,
     onSharedVideoConsumed: () -> Unit,
@@ -55,6 +60,9 @@ public fun AppRoot(
     val today = remember { LocalDate.now() }
     val context = LocalContext.current
     val networkMonitor = remember { NetworkMonitor(context) }
+    val transcriber = remember(apiKeys) { GeminiTranscriber(apiKeys) }
+    // 키가 바뀌면 화면이 다시 그려져야 한다. 설정 저장 시 이 값을 올린다.
+    var keyRevision by remember { mutableStateOf(0) }
     val online by networkMonitor.observe().collectFlowAsState(initial = networkMonitor.isOnline())
 
     var screen: Screen by remember {
@@ -100,11 +108,15 @@ public fun AppRoot(
             onOpenPlan = { planId -> screen = Screen.SessionSetup(planId) },
             onCaptureNote = { screen = Screen.CaptureNote },
             onOpenNotes = { screen = Screen.NoteList },
+            onOpenSettings = { screen = Screen.ApiKeySettings },
         )
 
         is Screen.ManualEntry -> ManualEntryScreen(
             initialVideoUri = current.videoUri,
             initialYouTubeVideoId = current.youTubeVideoId,
+            hasApiKey = remember(keyRevision) { apiKeys.hasKey },
+            onTranscribe = { videoId -> transcriber.transcribeYouTube(videoId) },
+            onOpenApiKeySettings = { screen = Screen.ApiKeySettings },
             onCancel = { screen = Screen.Home },
             onSaved = { plan, localUri ->
                 repository.putPlan(plan, localUri)
@@ -177,6 +189,21 @@ public fun AppRoot(
                 )
             }
         }
+
+        Screen.ApiKeySettings -> ApiKeyScreen(
+            currentKey = apiKeys.geminiKey,
+            currentModel = apiKeys.modelOverride,
+            resolvedModel = apiKeys.resolvedModel,
+            onSave = { key, model ->
+                apiKeys.geminiKey = key
+                apiKeys.modelOverride = model
+                // 모델을 직접 지정했으면 앞서 골라 둔 값을 버린다.
+                if (model != null) apiKeys.resolvedModel = null
+                keyRevision += 1
+                screen = Screen.Home
+            },
+            onBack = { screen = Screen.Home },
+        )
 
         Screen.CaptureNote -> CaptureNoteScreen(
             onCancel = { screen = Screen.Home },

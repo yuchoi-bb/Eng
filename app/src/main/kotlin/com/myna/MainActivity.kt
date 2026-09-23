@@ -24,13 +24,15 @@ public class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         handleShare(intent)
 
-        val repository = (application as MynaApplication).repository
+        val app = application as MynaApplication
+        val repository = app.repository
 
         setContent {
             MaterialTheme {
                 Surface {
                     AppRoot(
                         repository = repository,
+                        apiKeys = app.apiKeys,
                         sharedVideoUri = sharedVideoUri,
                         sharedYouTubeVideoId = sharedYouTubeVideoId,
                         onSharedVideoConsumed = {

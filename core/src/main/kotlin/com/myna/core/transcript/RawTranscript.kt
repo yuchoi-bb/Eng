@@ -1,5 +1,7 @@
 package com.myna.core.transcript
 
+import kotlinx.serialization.Serializable
+
 /**
  * 검증 이전의 전사 응답. **모든 필드가 nullable이고 enum이 문자열이다.**
  *
@@ -7,6 +9,7 @@ package com.myna.core.transcript
  * 잘못된 enum 값 하나에 응답 전체가 예외로 날아간다. 원본을 그대로 받아
  * [TranscriptValidator]가 항목별로 폴백하도록 한다.
  */
+@Serializable
 public data class RawTranscript(
     val schemaVersion: Int? = null,
     val source: String? = null,
@@ -22,6 +25,7 @@ public data class RawTranscript(
     val warnings: List<String> = emptyList(),
 )
 
+@Serializable
 public data class RawSentence(
     val index: Int? = null,
     val text: String? = null,
@@ -33,12 +37,14 @@ public data class RawSentence(
     val breathGroups: List<RawBreathGroup> = emptyList(),
 )
 
+@Serializable
 public data class RawBreathGroup(
     val text: String? = null,
     val startMs: Int? = null,
     val endMs: Int? = null,
 )
 
+@Serializable
 public data class RawExpression(
     val text: String? = null,
     val meaningKo: String? = null,

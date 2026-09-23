@@ -1,6 +1,7 @@
 package com.myna
 
 import android.app.Application
+import com.myna.data.ApiKeyStore
 import com.myna.data.LocalStore
 import com.myna.data.ShadowingRepository
 
@@ -13,4 +14,6 @@ public class MynaApplication : Application() {
     public val repository: ShadowingRepository by lazy {
         ShadowingRepository(LocalStore(filesDir))
     }
+
+    internal val apiKeys: ApiKeyStore by lazy { ApiKeyStore(this) }
 }

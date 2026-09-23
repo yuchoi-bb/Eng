@@ -26,6 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
@@ -41,6 +42,8 @@ import com.myna.core.transcript.RawSentence
 import com.myna.core.transcript.RawTranscript
 import com.myna.core.transcript.TranscriptValidator
 import com.myna.core.transcript.ValidationResult
+import com.myna.transcribe.TranscribeResult
+import kotlinx.coroutines.launch
 import java.util.UUID
 
 private class SentenceDraft {
@@ -68,9 +71,14 @@ internal fun ManualEntryScreen(
     initialVideoUri: Uri?,
     initialYouTubeVideoId: String?,
     dailyTargetSec: Int,
+    hasApiKey: Boolean,
+    onTranscribe: suspend (videoId: String) -> TranscribeResult,
+    onOpenApiKeySettings: () -> Unit,
     onCancel: () -> Unit,
     onSaved: (VideoPlan, String?) -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
+    var transcribing by remember { mutableStateOf(false) }
     var videoUri by remember { mutableStateOf(initialVideoUri) }
     var youTubeVideoId by remember { mutableStateOf(initialYouTubeVideoId) }
     var linkInput by remember { mutableStateOf("") }
@@ -122,6 +130,60 @@ internal fun ManualEntryScreen(
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(top = 6.dp),
         )
+
+        // 자동 채우기. 유튜브 링크가 있을 때만 의미가 있다 — 기기 영상은 전사 경로가 다르다.
+        val readyVideoId = youTubeVideoId
+        if (readyVideoId != null) {
+            Spacer(Modifier.height(8.dp))
+            if (hasApiKey) {
+                Button(
+                    onClick = {
+                        scope.launch {
+                            transcribing = true
+                            error = null
+                            when (val result = onTranscribe(readyVideoId)) {
+                                is TranscribeResult.Success -> {
+                                    drafts.clear()
+                                    result.accepted.transcript.sentences.forEach { sentence ->
+                                        drafts.add(
+                                            SentenceDraft().apply {
+                                                text = sentence.text
+                                                translationKo = sentence.translationKo
+                                                startSec = (sentence.startMs / 1000.0).toString()
+                                                endSec = (sentence.endMs / 1000.0).toString()
+                                            },
+                                        )
+                                    }
+                                    if (result.accepted.repairs.isNotEmpty()) {
+                                        error = "문장을 채웠습니다. 일부를 자동으로 고쳤으니 확인해 주세요."
+                                    }
+                                }
+                                is TranscribeResult.Rejected ->
+                                    error = "이 영상은 쓸 수 없습니다. (${result.reason}) 직접 적어 주세요."
+                                is TranscribeResult.Failed -> error = result.message
+                                TranscribeResult.NoApiKey -> onOpenApiKeySettings()
+                            }
+                            transcribing = false
+                        }
+                    },
+                    enabled = !transcribing,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(if (transcribing) "영상을 듣는 중…" else "문장 자동으로 채우기")
+                }
+                if (transcribing) {
+                    Text(
+                        "영상 전체를 듣고 받아 적는 중입니다. 길이에 따라 1분 정도 걸립니다.",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+            } else {
+                TextButton(onClick = onOpenApiKeySettings, modifier = Modifier.fillMaxWidth()) {
+                    Text("문장을 자동으로 채우려면 API 키를 넣어 주세요")
+                }
+            }
+        }
 
         Spacer(Modifier.height(8.dp))
         Text(

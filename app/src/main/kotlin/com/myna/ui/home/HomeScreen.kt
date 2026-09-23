@@ -35,6 +35,7 @@ internal fun HomeScreen(
     onOpenPlan: (String) -> Unit,
     onCaptureNote: () -> Unit,
     onOpenNotes: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize().padding(20.dp)) {
         Text("오늘", style = MaterialTheme.typography.headlineSmall)
@@ -73,6 +74,9 @@ internal fun HomeScreen(
         Spacer(Modifier.height(8.dp))
         Button(onClick = onAddVideo, modifier = Modifier.fillMaxWidth()) {
             Text("영상 추가하기")
+        }
+        TextButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
+            Text("설정")
         }
 
         Spacer(Modifier.height(24.dp))
