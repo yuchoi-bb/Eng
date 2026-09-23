@@ -37,12 +37,35 @@ internal class ApiKeyStore(context: Context) {
             }.apply()
         }
 
-    /** 목록 조회로 고른 모델의 캐시. 매번 조회하면 전사가 느려진다. */
+    /** 실제로 영상 전사에 성공한 모델. 매번 후보를 훑지 않기 위해 기억한다. */
     var resolvedModel: String?
         get() = prefs.getString(KEY_RESOLVED, null)
         set(value) {
             prefs.edit().putString(KEY_RESOLVED, value).apply()
         }
+
+    /**
+     * 유튜브 영상 입력을 거절한 모델들.
+     *
+     * `models.list`는 어떤 모델이 영상을 받는지 알려 주지 않는다. 한 번 거절당한 모델을
+     * 기억해 두지 않으면 전사할 때마다 같은 모델에 같은 요청을 보내고 같은 거절을 받는다 —
+     * 한 번의 왕복이 수십 초다.
+     */
+    var unsupportedModels: Set<String>
+        get() = prefs.getStringSet(KEY_UNSUPPORTED, emptySet()).orEmpty()
+        set(value) {
+            prefs.edit().putStringSet(KEY_UNSUPPORTED, value).apply()
+        }
+
+    fun markUnsupported(model: String) {
+        unsupportedModels = unsupportedModels + model
+        if (resolvedModel == model) resolvedModel = null
+    }
+
+    /** 키를 바꾸면 모델 판단을 처음부터 다시 한다. 키마다 쓸 수 있는 모델이 다르다. */
+    fun forgetModelDiscovery() {
+        prefs.edit().remove(KEY_RESOLVED).remove(KEY_UNSUPPORTED).apply()
+    }
 
     val hasKey: Boolean get() = geminiKey != null
 
@@ -52,5 +75,6 @@ internal class ApiKeyStore(context: Context) {
         const val KEY_GEMINI = "gemini_api_key"
         const val KEY_MODEL = "gemini_model_override"
         const val KEY_RESOLVED = "gemini_model_resolved"
+        const val KEY_UNSUPPORTED = "gemini_models_unsupported"
     }
 }

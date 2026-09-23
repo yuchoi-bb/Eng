@@ -191,16 +191,21 @@ internal fun AppRoot(
         }
 
         Screen.ApiKeySettings -> ApiKeyScreen(
-            currentKey = apiKeys.geminiKey,
-            currentModel = apiKeys.modelOverride,
-            resolvedModel = apiKeys.resolvedModel,
+            currentKey = remember(keyRevision) { apiKeys.geminiKey },
+            currentModel = remember(keyRevision) { apiKeys.modelOverride },
+            resolvedModel = remember(keyRevision) { apiKeys.resolvedModel },
+            unsupportedModels = remember(keyRevision) { apiKeys.unsupportedModels },
             onSave = { key, model ->
+                // 키가 바뀌면 모델 판단을 처음부터 다시 한다. 키마다 쓸 수 있는 모델이 다르다.
+                if (key != apiKeys.geminiKey) apiKeys.forgetModelDiscovery()
                 apiKeys.geminiKey = key
                 apiKeys.modelOverride = model
-                // 모델을 직접 지정했으면 앞서 골라 둔 값을 버린다.
-                if (model != null) apiKeys.resolvedModel = null
                 keyRevision += 1
                 screen = Screen.Home
+            },
+            onForgetModels = {
+                apiKeys.forgetModelDiscovery()
+                keyRevision += 1
             },
             onBack = { screen = Screen.Home },
         )

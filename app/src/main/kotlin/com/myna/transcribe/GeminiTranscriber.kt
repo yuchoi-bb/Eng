@@ -1,6 +1,7 @@
 package com.myna.transcribe
 
 import android.util.Log
+import com.myna.core.transcribe.GeminiErrorKind
 import com.myna.core.transcribe.GeminiExchange
 import com.myna.core.transcribe.GeminiModel
 import com.myna.core.transcript.RawTranscript
@@ -16,7 +17,7 @@ import java.net.URL
 
 /** 전사 결과. 실패도 값으로 돌려준다 — 사용자에게 무엇이 잘못됐는지 말해 줘야 한다. */
 internal sealed interface TranscribeResult {
-    data class Success(val accepted: ValidationResult.Accepted) : TranscribeResult
+    data class Success(val accepted: ValidationResult.Accepted, val model: String) : TranscribeResult
     data class Rejected(val reason: RejectionReason) : TranscribeResult
     data class Failed(val message: String) : TranscribeResult
     data object NoApiKey : TranscribeResult
@@ -25,62 +26,113 @@ internal sealed interface TranscribeResult {
 /**
  * 유튜브 영상을 전사해 문장을 채운다. REQUIREMENTS §F-1.
  *
- * 모델 응답을 그대로 믿지 않는다 — [TranscriptValidator]를 반드시 거친다
- * (TRANSCRIPTION_SCHEMA §4.1). 손으로 적은 문장도 같은 검증을 통과하므로, 두 입력 경로가
- * 같은 보장을 갖는다.
+ * **어떤 모델이 영상을 받는지 미리 알 수 없다.** `models.list` 응답에 그 정보가 없기
+ * 때문이다. 그래서 후보를 순서대로 눌러 보고, 통한 모델을 기억한다. 거절한 모델도
+ * 기억해 두 번 누르지 않는다.
+ *
+ * 모델 응답은 그대로 믿지 않는다 — [TranscriptValidator]를 반드시 거친다
+ * (TRANSCRIPTION_SCHEMA §4.1).
  */
 internal class GeminiTranscriber(private val keys: ApiKeyStore) {
 
     suspend fun transcribeYouTube(videoId: String): TranscribeResult = withContext(Dispatchers.IO) {
         val key = keys.geminiKey ?: return@withContext TranscribeResult.NoApiKey
-        val model = resolveModel(key)
-            ?: return@withContext TranscribeResult.Failed("쓸 수 있는 모델을 찾지 못했습니다.")
 
-        // TRANSCRIPTION_SCHEMA §4.3 — 파싱 실패는 1회만 재요청한다. 낮은 temperature로.
-        val attempts = listOf(
+        val candidates = modelCandidates(key)
+        if (candidates.isEmpty()) {
+            return@withContext TranscribeResult.Failed(
+                "영상을 받아 줄 모델을 찾지 못했습니다. 설정에서 모델 이름을 직접 넣어 보세요.",
+            )
+        }
+
+        val refused = mutableListOf<String>()
+        for (model in candidates) {
+            when (val outcome = attempt(model, key, videoId)) {
+                is Attempt.Done -> return@withContext outcome.result
+                is Attempt.TryNextModel -> {
+                    // 이 모델은 영상을 못 받는다. 기억해 두고 다음으로.
+                    keys.markUnsupported(model)
+                    refused += model
+                    Log.i(TAG, "$model 이(가) 영상 입력을 거절했습니다: ${outcome.message}")
+                }
+            }
+        }
+
+        TranscribeResult.Failed(
+            "시도한 모델이 모두 영상 입력을 받지 않았습니다 (${refused.joinToString()}). " +
+                "설정에서 모델 이름을 직접 넣어 보세요.",
+        )
+    }
+
+    private sealed interface Attempt {
+        data class Done(val result: TranscribeResult) : Attempt
+        data class TryNextModel(val message: String) : Attempt
+    }
+
+    private fun attempt(model: String, key: String, videoId: String): Attempt {
+        // TRANSCRIPTION_SCHEMA §4.3 — 파싱 실패는 temperature를 낮춰 1회만 재요청한다.
+        val bodies = listOf(
             GeminiExchange.requestForYouTube(videoId),
             GeminiExchange.retryRequestForYouTube(videoId),
         )
 
-        var lastError: String? = null
-        for ((index, body) in attempts.withIndex()) {
+        var lastProblem = "전사에 실패했습니다."
+        for ((index, body) in bodies.withIndex()) {
             val response = post("$BASE/models/$model:generateContent", key, body)
-                ?: run { lastError = "네트워크에 닿지 못했습니다."; return@withContext TranscribeResult.Failed(lastError!!) }
+                ?: return Attempt.Done(TranscribeResult.Failed("네트워크에 닿지 못했습니다."))
 
-            GeminiExchange.errorMessage(response)?.let { message ->
-                // 키나 모델 문제는 재요청해도 같다. 바로 알린다.
-                return@withContext TranscribeResult.Failed(message)
+            val error = GeminiExchange.errorMessage(response)
+            if (error != null) {
+                return when (GeminiModel.classifyError(error)) {
+                    // 모델을 바꾸면 통할 수 있다.
+                    GeminiErrorKind.MODEL_CAPABILITY -> Attempt.TryNextModel(error)
+                    // 키와 한도는 모델을 바꿔도 같다. 계속 누르면 시간과 한도만 버린다.
+                    GeminiErrorKind.AUTH -> Attempt.Done(
+                        TranscribeResult.Failed("API 키를 확인해 주세요. ($error)"),
+                    )
+                    GeminiErrorKind.QUOTA -> Attempt.Done(
+                        TranscribeResult.Failed("사용 한도를 넘었습니다. 잠시 뒤 다시 시도해 주세요."),
+                    )
+                    GeminiErrorKind.OTHER -> Attempt.Done(TranscribeResult.Failed(error))
+                }
             }
 
             val raw = GeminiExchange.parseTranscript(response, videoId)
             if (raw == null) {
-                lastError = "응답을 읽지 못했습니다."
-                Log.w(TAG, "전사 응답 파싱 실패 (시도 ${index + 1})")
+                lastProblem = "응답을 읽지 못했습니다."
+                Log.w(TAG, "$model 응답 파싱 실패 (시도 ${index + 1})")
                 continue
             }
-            return@withContext validate(raw)
+            // 통했다. 다음부터는 이 모델로 바로 간다.
+            keys.resolvedModel = model
+            return Attempt.Done(validate(raw))
         }
-        TranscribeResult.Failed(lastError ?: "전사에 실패했습니다.")
+        return Attempt.Done(TranscribeResult.Failed(lastProblem))
     }
 
     private fun validate(raw: RawTranscript): TranscribeResult =
         when (val result = TranscriptValidator.validate(raw)) {
-            is ValidationResult.Accepted -> TranscribeResult.Success(result)
+            is ValidationResult.Accepted ->
+                TranscribeResult.Success(result, keys.resolvedModel.orEmpty())
             is ValidationResult.Rejected -> TranscribeResult.Rejected(result.reason)
         }
 
     /**
-     * 쓸 모델을 정한다. 설정 지정값 → 캐시 → 목록 조회 순.
+     * 시도할 모델 순서. 직접 지정 → 지난번 성공 → 목록 조회 순으로 앞자리를 준다.
      *
-     * 이름을 코드에 박지 않는 이유는 [GeminiModel]에 적었다. 조회 결과는 캐시해 둔다 —
-     * 전사할 때마다 목록을 받으면 그만큼 느려진다.
+     * 거절 이력이 있는 모델은 뺀다. 빼고 나면 아무것도 안 남는 경우가 있는데, 그때는
+     * 이력을 무시하고 전부 다시 시도한다 — 모델 쪽 사정이 바뀌었을 수 있다.
      */
-    private fun resolveModel(key: String): String? {
-        keys.modelOverride?.let { return it }
-        keys.resolvedModel?.let { return it }
+    private fun modelCandidates(key: String): List<String> {
+        keys.modelOverride?.let { return listOf(it) }
 
-        val body = get("$BASE/models", key) ?: return null
-        return GeminiModel.pickForVideo(body)?.also { keys.resolvedModel = it }
+        val discovered = get("$BASE/models", key)
+            ?.let(GeminiModel::candidatesForVideo)
+            .orEmpty()
+        val ordered = (listOfNotNull(keys.resolvedModel) + discovered).distinct()
+
+        val fresh = ordered.filterNot { it in keys.unsupportedModels }
+        return fresh.ifEmpty { ordered }.take(MAX_ATTEMPTS)
     }
 
     private fun get(url: String, key: String): String? = runCatching {
@@ -122,6 +174,9 @@ internal class GeminiTranscriber(private val keys: ApiKeyStore) {
         const val BASE = "https://generativelanguage.googleapis.com/v1beta"
         const val CONNECT_TIMEOUT_MS = 15_000
         const val READ_TIMEOUT_MS = 180_000
+
+        /** 거절 한 번이 수십 초다. 무한정 훑지 않는다. */
+        const val MAX_ATTEMPTS = 4
         const val TAG = "GeminiTranscriber"
     }
 }

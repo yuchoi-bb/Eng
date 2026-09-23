@@ -154,8 +154,10 @@ internal fun ManualEntryScreen(
                                             },
                                         )
                                     }
-                                    if (result.accepted.repairs.isNotEmpty()) {
-                                        error = "문장을 채웠습니다. 일부를 자동으로 고쳤으니 확인해 주세요."
+                                    error = if (result.accepted.repairs.isNotEmpty()) {
+                                        "문장을 채웠습니다. 일부를 자동으로 고쳤으니 확인해 주세요."
+                                    } else {
+                                        null
                                     }
                                 }
                                 is TranscribeResult.Rejected ->

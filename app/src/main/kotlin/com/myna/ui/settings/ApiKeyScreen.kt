@@ -32,7 +32,9 @@ internal fun ApiKeyScreen(
     currentKey: String?,
     currentModel: String?,
     resolvedModel: String?,
+    unsupportedModels: Set<String>,
     onSave: (key: String?, model: String?) -> Unit,
+    onForgetModels: () -> Unit,
     onBack: () -> Unit,
 ) {
     var key by remember { mutableStateOf(currentKey.orEmpty()) }
@@ -74,10 +76,29 @@ internal fun ApiKeyScreen(
             modifier = Modifier.fillMaxWidth(),
         )
         Text(
-            "모델 이름은 자주 바뀝니다. 비워 두면 앱이 쓸 수 있는 목록에서 골라 씁니다.",
+            "모델 이름은 자주 바뀝니다. 비워 두면 앱이 목록에서 후보를 골라 차례로 시도하고, " +
+                "영상을 받아 준 모델을 기억합니다.",
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(top = 6.dp),
         )
+
+        resolvedModel?.let {
+            Text(
+                "지난번에 통한 모델: $it",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+        if (unsupportedModels.isNotEmpty()) {
+            // 어떤 모델이 영상을 받는지는 목록으로 알 수 없어 눌러 봐야 안다.
+            // 무엇이 거절했는지 보여 주면 직접 지정할 때 참고가 된다.
+            Text(
+                "영상을 거절한 모델: ${unsupportedModels.joinToString()}",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            TextButton(onClick = onForgetModels) { Text("모델 판단 초기화") }
+        }
 
         Spacer(Modifier.height(20.dp))
         Text(
