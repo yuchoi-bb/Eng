@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      런처 아이콘 배경. 따뜻한 아이보리.
+
+      새가 89% 검정이라 배경이 어두우면 48dp에서 형체가 사라진다. 순백 대신 아이보리를
+      쓴 것은 노란 부리와 같은 계열로 묶기 위해서다.
+    -->
+    <color name="ic_launcher_background">#FFF8E8</color>
+</resources>
