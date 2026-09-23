@@ -191,6 +191,9 @@ internal fun AppRoot(
         }
 
         Screen.ApiKeySettings -> ApiKeyScreen(
+            updateStatus = updateStatusText(state.lastUpdateCheckEpochMs, state.skippedUpdateVersion),
+            // 마지막 확인 시각을 지우면 다음 ON_START에서 바로 다시 확인한다.
+            onCheckUpdate = { repository.recordUpdateCheck(0L) },
             currentKey = remember(keyRevision) { apiKeys.geminiKey },
             currentModel = remember(keyRevision) { apiKeys.modelOverride },
             resolvedModel = remember(keyRevision) { apiKeys.resolvedModel },
@@ -245,4 +248,21 @@ internal fun AppRoot(
             }
         }
     }
+}
+
+/** 설정 화면에 보여 줄 업데이트 상태 한 줄. */
+private fun updateStatusText(lastCheckedEpochMs: Long?, skippedVersion: String?): String {
+    val checked = when {
+        lastCheckedEpochMs == null || lastCheckedEpochMs == 0L -> "아직 확인하지 않았습니다"
+        else -> {
+            val minutes = (System.currentTimeMillis() - lastCheckedEpochMs) / 60_000
+            when {
+                minutes < 1 -> "방금 확인했습니다"
+                minutes < 60 -> "${minutes}분 전에 확인했습니다"
+                else -> "${minutes / 60}시간 전에 확인했습니다"
+            }
+        }
+    }
+    val skipped = skippedVersion?.let { " · v$it 은 건너뛰는 중" }.orEmpty()
+    return "앱을 켤 때마다 새 버전을 확인합니다. $checked$skipped"
 }

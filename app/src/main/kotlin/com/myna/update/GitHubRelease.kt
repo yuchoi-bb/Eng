@@ -7,7 +7,7 @@ import kotlinx.serialization.Serializable
  * GitHub Releases API 응답 중 필요한 부분만.
  *
  * 저장소가 공개라 토큰 없이 조회된다. 비인증 요청은 IP당 시간 60회로 제한되는데,
- * 앱은 [UpdateChecker.CHECK_INTERVAL_MS] 간격으로만 물어보므로 닿을 일이 없다.
+ * 앱을 켤 때마다 한 번씩만 물어보므로 사람이 켜는 빈도로는 닿지 않는다.
  */
 @Serializable
 internal data class GitHubRelease(

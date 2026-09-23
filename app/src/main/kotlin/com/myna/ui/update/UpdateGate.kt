@@ -7,14 +7,18 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.myna.BuildConfig
+import com.myna.core.update.UpdatePolicy
 import com.myna.update.ApkInstaller
 import com.myna.update.AvailableUpdate
 import com.myna.update.DownloadState
@@ -22,12 +26,12 @@ import com.myna.update.UpdateChecker
 import kotlinx.coroutines.launch
 
 /**
- * 새 버전이 나왔는지 보고, 있으면 받아서 설치할지 묻는다.
+ * 앱을 켤 때마다 새 버전이 있는지 보고, 있으면 받아서 설치할지 묻는다.
  *
- * 사이드로드 배포라 Play Store의 자동 업데이트가 없다. 앱이 스스로 알리지 않으면
- * 사용자가 릴리즈 페이지를 들여다봐야 새 빌드를 안다.
+ * 사이드로드 배포라 Play Store가 대신 알려 주지 않는다. 앱이 스스로 묻지 않으면 사용자는
+ * 릴리즈 페이지를 들여다봐야 한다.
  *
- * 화면을 가로막지 않는다 — 확인에 실패하거나 네트워크가 없으면 조용히 넘어간다.
+ * **화면을 가로막지 않는다** — 확인에 실패하거나 회선이 없으면 조용히 넘어간다.
  */
 @Composable
 internal fun UpdateGate(
@@ -38,32 +42,55 @@ internal fun UpdateGate(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val lifecycleOwner = LocalLifecycleOwner.current
 
     var update by remember { mutableStateOf<AvailableUpdate?>(null) }
     var download by remember { mutableStateOf<DownloadState>(DownloadState.Idle) }
     var message by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(Unit) {
-        val now = System.currentTimeMillis()
-        val due = lastCheckedEpochMs == null ||
-            now - lastCheckedEpochMs >= UpdateChecker.CHECK_INTERVAL_MS
-        if (!due) return@LaunchedEffect
+    // 한 번 닫은 안내를 같은 실행 안에서 다시 띄우지 않는다. 복귀할 때마다 다시 뜨면 성가시다.
+    var dismissedVersion by remember { mutableStateOf<String?>(null) }
 
-        onChecked(now)
-        val found = UpdateChecker(
-            repo = BuildConfig.UPDATE_REPO,
-            currentVersion = BuildConfig.VERSION_NAME,
-        ).check()
+    /**
+     * 켤 때와 화면으로 돌아올 때 확인한다.
+     *
+     * `LaunchedEffect(Unit)`만 두면 앱이 메모리에 남아 있는 동안에는 다시 확인하지 않는다.
+     * 업무 중에 며칠씩 켜 둔 앱이 새 버전을 영영 모르게 된다.
+     */
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event != Lifecycle.Event.ON_START) return@LifecycleEventObserver
 
-        // 건너뛴 버전은 다시 묻지 않는다. 그 다음 버전이 나오면 다시 묻는다.
-        if (found != null && found.version != skippedVersion) update = found
+            val now = System.currentTimeMillis()
+            if (!UpdatePolicy.shouldCheck(lastCheckedEpochMs, now)) return@LifecycleEventObserver
+
+            onChecked(now)
+            scope.launch {
+                val found = UpdateChecker(
+                    repo = BuildConfig.UPDATE_REPO,
+                    currentVersion = BuildConfig.VERSION_NAME,
+                ).check() ?: return@launch
+
+                // 건너뛴 버전과 방금 닫은 버전은 다시 묻지 않는다.
+                if (found.version != skippedVersion && found.version != dismissedVersion) {
+                    update = found
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     val pending = update ?: return
     val busy = download is DownloadState.Running
 
     AlertDialog(
-        onDismissRequest = { if (!busy) update = null },
+        onDismissRequest = {
+            if (!busy) {
+                dismissedVersion = pending.version
+                update = null
+            }
+        },
         title = { Text("새 버전 v${pending.version}") },
         text = { Text(bodyText(pending, download, message)) },
         confirmButton = {

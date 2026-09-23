@@ -79,8 +79,7 @@ internal class UpdateChecker(
     }
 
     companion object {
-        /** 확인 간격. 개인용 앱에 하루 네 번이면 충분하고, 비인증 레이트리밋과도 무관해진다. */
-        const val CHECK_INTERVAL_MS: Long = 6 * 60 * 60 * 1000
+        // 확인 시점 판단은 core의 UpdatePolicy가 한다 — 앱을 켤 때마다 확인한다.
 
         private const val TIMEOUT_MS = 10_000
         private const val TAG = "UpdateChecker"

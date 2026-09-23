@@ -20,6 +20,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.myna.BuildConfig
 
 /**
  * Gemini API 키 입력.
@@ -29,6 +30,8 @@ import androidx.compose.ui.unit.dp
  */
 @Composable
 internal fun ApiKeyScreen(
+    updateStatus: String,
+    onCheckUpdate: () -> Unit,
     currentKey: String?,
     currentModel: String?,
     resolvedModel: String?,
@@ -42,7 +45,21 @@ internal fun ApiKeyScreen(
     var reveal by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().padding(20.dp)) {
-        Text("자동 문장 채우기", style = MaterialTheme.typography.headlineSmall)
+        Text("설정", style = MaterialTheme.typography.headlineSmall)
+
+        // --- 버전 ---
+        Spacer(Modifier.height(16.dp))
+        Text("버전 v${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.titleSmall)
+        Text(
+            updateStatus,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        TextButton(onClick = onCheckUpdate) { Text("새 버전 지금 확인") }
+
+        // --- 자동 문장 채우기 ---
+        Spacer(Modifier.height(24.dp))
+        Text("자동 문장 채우기", style = MaterialTheme.typography.titleMedium)
         Text(
             "Gemini API 키를 넣으면 유튜브 링크만으로 문장과 뜻이 자동으로 채워집니다.\n" +
                 "aistudio.google.com 에서 무료로 발급받을 수 있습니다.",
