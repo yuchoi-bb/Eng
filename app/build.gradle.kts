@@ -72,6 +72,14 @@ android {
         buildConfig = true
     }
 
+    lint {
+        // android-youtube-player 13.0.0이 androidx.lifecycle을 2.9.4로 끌어올리는데, 거기 딸린
+        // LiveData lint 규칙이 이 AGP의 lint 엔진과 맞지 않아 IncompatibleClassChangeError로
+        // lint 자체가 죽는다(릴리즈 빌드가 멈춘다). 이 앱은 LiveData를 쓰지 않으므로 그 규칙
+        // 하나만 끈다. AGP를 올리면 이 줄은 지워도 된다.
+        disable += "NullSafeMutableLiveData"
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
