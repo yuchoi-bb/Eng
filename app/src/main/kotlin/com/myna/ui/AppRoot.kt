@@ -177,6 +177,8 @@ internal fun AppRoot(
                     options = current.options,
                     playbackRate = state.settings.playbackRate,
                     showTransliteration = state.settings.showTransliterationKo,
+                    dailyAlreadySec = repository.today(today).achievedSec,
+                    dailyTargetSec = state.settings.dailyTargetSec,
                     onKeepScreenOn = onKeepScreenOn,
                     onSentenceCleared = { index ->
                         repository.markSentenceCleared(current.planId, index)

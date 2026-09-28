@@ -18,6 +18,14 @@ import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.views.YouTube
 internal class YouTubeSourcePlayback(
     view: YouTubePlayerView,
     private val videoId: String,
+    /**
+     * 임베드 재생이 거부됐을 때 알린다.
+     *
+     * 유튜브는 영상마다 임베드 허용 여부가 다르다. 거부되면 플레이어가 "이 동영상은 볼 수
+     * 없습니다 (152-4)"를 띄우는데, **재생 완료 콜백이 영영 오지 않는다.** 그대로 두면
+     * 세션이 듣기 단계에서 굳는다.
+     */
+    private val onPlaybackRefused: (String) -> Unit = {},
 ) : SourcePlayback {
 
     private var player: YouTubePlayer? = null
@@ -35,6 +43,15 @@ internal class YouTubeSourcePlayback(
                     // 준비 전에 들어온 재생 요청을 흘리지 않는다.
                     pendingPlay?.let { it(youTubePlayer) }
                     pendingPlay = null
+                }
+
+                override fun onError(
+                    youTubePlayer: YouTubePlayer,
+                    error: PlayerConstants.PlayerError,
+                ) {
+                    endSeconds = NO_TARGET
+                    pendingPlay = null
+                    onPlaybackRefused(describe(error))
                 }
 
                 override fun onCurrentSecond(youTubePlayer: YouTubePlayer, second: Float) {
@@ -90,6 +107,23 @@ internal class YouTubeSourcePlayback(
         speed <= 1.4f -> PlayerConstants.PlaybackRate.RATE_1_25
         speed <= 1.75f -> PlayerConstants.PlaybackRate.RATE_1_5
         else -> PlayerConstants.PlaybackRate.RATE_2
+    }
+
+    private fun describe(error: PlayerConstants.PlayerError): String = when (error) {
+        PlayerConstants.PlayerError.VIDEO_NOT_PLAYABLE_IN_EMBEDDED_PLAYER ->
+            "이 영상은 앱 안에서 재생할 수 없습니다. 영상 주인이 외부 재생을 막아 둔 경우입니다."
+
+        PlayerConstants.PlayerError.VIDEO_NOT_FOUND ->
+            "영상을 찾을 수 없습니다. 비공개로 바뀌었거나 삭제됐을 수 있습니다."
+
+        PlayerConstants.PlayerError.INVALID_PARAMETER_IN_REQUEST ->
+            "이 영상은 앱 안에서 재생할 수 없습니다."
+
+        PlayerConstants.PlayerError.HTML_5_PLAYER ->
+            "플레이어를 띄우지 못했습니다."
+
+        PlayerConstants.PlayerError.UNKNOWN ->
+            "영상을 재생하지 못했습니다."
     }
 
     private companion object {

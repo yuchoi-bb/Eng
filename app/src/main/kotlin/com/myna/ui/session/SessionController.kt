@@ -32,6 +32,17 @@ internal data class SessionUiState(
     val finished: Boolean = false,
     /** 방금 완주한 문장의 번호. 오프라인 복습 대상 판정에 쓰인다. */
     val clearedSentenceIndex: Int? = null,
+    /** 읽히는 진행 표시 — 카운트(306회)가 아니라 회차로 보여 준다. */
+    val currentRep: Int = 1,
+    val totalReps: Int = 1,
+    val currentSentenceNumber: Int = 1,
+    val sentenceCount: Int = 1,
+    /** 오늘 목표를 채웠는가. 채웠으면 끝낼 수 있다고 알린다. */
+    val dailyGoalMet: Boolean = false,
+    val remainingDailySec: Int = 0,
+    /** 원본 재생이 거부됐을 때 보여 줄 안내. */
+    val playbackNotice: String? = null,
+    val playsSource: Boolean = true,
 ) {
     val progressFraction: Float
         get() = if (targetCounts == 0) 0f else completedCounts.toFloat() / targetCounts
@@ -49,10 +60,22 @@ internal class SessionController(
     private val plan: VideoPlan,
     private val playbackRate: Float,
     private val options: SessionOptions = SessionOptions(),
+    dailyAlreadySec: Int = 0,
+    dailyTargetSec: Int = 0,
 ) {
     private val recorder = SentenceRecorder(context)
     private val recordingPlayer = RecordingPlayer()
-    private val engine = SessionEngine(plan, options)
+    private val engine = SessionEngine(plan, options, dailyAlreadySec, dailyTargetSec)
+
+    /**
+     * 원본 재생을 포기했는가.
+     *
+     * 유튜브가 임베드 재생을 거부하면 재생 완료 콜백이 오지 않아 세션이 듣기 단계에서
+     * 굳는다. 그때 자막만 보는 방식으로 넘어간다 — 오프라인 복습과 같은 경로다.
+     */
+    private var sourceGaveUp = false
+
+    private val playsSource: Boolean get() = options.sourceAudioAvailable && !sourceGaveUp
 
     /**
      * 원본 재생기. 화면이 뷰를 만든 뒤에 붙인다 — 업로드는 ExoPlayer, 유튜브는
@@ -78,10 +101,31 @@ internal class SessionController(
     fun start() {
         // 원본이 없는 세션(오프라인 복습, 현장 메모 연습)은 재생기를 기다리지 않는다.
         if (started) return
-        if (options.sourceAudioAvailable && source == null) return
+        if (playsSource && source == null) return
         started = true
         beginStage()
     }
+
+    /**
+     * 원본 재생이 거부됐다. 세션을 멈추지 않고 자막만 보는 방식으로 이어 간다.
+     *
+     * 듣기 단계는 들려줄 것이 없으므로 건너뛴다 — 빈 화면을 넘기게 하지 않기 위해서다.
+     */
+    fun onSourceRefused(reason: String) {
+        if (sourceGaveUp) return
+        sourceGaveUp = true
+        playbackNotice = reason
+        source?.pause()
+
+        // 듣기 단계에서 굳어 있었다면 말하기로 넘긴다.
+        if (!engine.currentStage.isSpeaking) {
+            advance()
+        } else {
+            beginStage()
+        }
+    }
+
+    private var playbackNotice: String? = null
 
     /**
      * 현재 단계를 시작한다.
@@ -100,7 +144,7 @@ internal class SessionController(
         isRecording = false
         _uiState.value = snapshot()
 
-        if (!options.sourceAudioAvailable) {
+        if (!playsSource) {
             // 들려줄 원본이 없다. 자막을 띄운 채로 사용자가 말하기를 기다린다.
             if (engine.requiresRecording) startRecording(step.sentenceIndex) else waitForUser()
             return
@@ -184,6 +228,10 @@ internal class SessionController(
         val sentence = plan.sentences[step.sentenceIndex]
         val recording = latestRecordingFor(step.sentenceIndex) ?: return
 
+        if (!playsSource) {
+            recordingPlayer.play(recording) { beginStage() }
+            return
+        }
         source?.playSegment(segmentFor(step.unit, sentence), playbackRate) {
             recordingPlayer.play(recording) {
                 // 비교가 끝나면 현재 단계를 처음부터 다시 듣는다.
@@ -218,6 +266,14 @@ internal class SessionController(
             remainingCounts = engine.remainingCounts,
             finished = engine.isFinished,
             clearedSentenceIndex = lastClearedSentenceIndex,
+            currentRep = engine.currentRep,
+            totalReps = engine.totalReps,
+            currentSentenceNumber = engine.currentSentenceNumber,
+            sentenceCount = engine.sentenceCount,
+            dailyGoalMet = engine.dailyGoalMet,
+            remainingDailySec = engine.remainingDailySec,
+            playbackNotice = playbackNotice,
+            playsSource = playsSource,
         )
     }
 }

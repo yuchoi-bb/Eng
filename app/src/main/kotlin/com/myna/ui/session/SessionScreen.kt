@@ -56,12 +56,16 @@ internal fun SessionScreen(
     options: SessionOptions,
     playbackRate: Float,
     showTransliteration: Boolean,
+    dailyAlreadySec: Int,
+    dailyTargetSec: Int,
     onKeepScreenOn: (Boolean) -> Unit,
     onSentenceCleared: (sentenceIndex: Int) -> Unit,
     onFinished: (achievedSec: Int, counts: Int) -> Unit,
 ) {
     val context = LocalContext.current
-    val controller = remember(plan.id.value) { SessionController(context, plan, playbackRate, options) }
+    val controller = remember(plan.id.value) {
+        SessionController(context, plan, playbackRate, options, dailyAlreadySec, dailyTargetSec)
+    }
     val ui by controller.uiState
 
     var permissionGranted by remember {
@@ -109,7 +113,7 @@ internal fun SessionScreen(
         // factory 안에서 컨트롤러에 연결한다 — §F-1은 유튜브를 공식 임베드로만 재생하게 한다.
         val playerModifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
         // when의 대상이 표현식이면 각 분기에서 스마트 캐스트가 되지 않는다. 지역 val로 받는다.
-        val activeSource = source.takeIf { options.sourceAudioAvailable }
+        val activeSource = source.takeIf { options.sourceAudioAvailable && ui.playsSource }
         when (activeSource) {
             // 원본이 없는 세션(오프라인 복습, 현장 메모 연습)은 재생할 것이 없다.
             null -> Text(
@@ -140,7 +144,15 @@ internal fun SessionScreen(
                 AndroidView(
                     factory = { viewContext ->
                         YouTubePlayerView(viewContext).also { view ->
-                            controller.attachSource(YouTubeSourcePlayback(view, videoId))
+                            controller.attachSource(
+                                YouTubeSourcePlayback(
+                                    view = view,
+                                    videoId = videoId,
+                                    // 임베드가 거부되면 재생 완료 콜백이 오지 않는다.
+                                    // 그대로 두면 세션이 듣기 단계에서 굳는다.
+                                    onPlaybackRefused = controller::onSourceRefused,
+                                ),
+                            )
                         }
                     },
                     onRelease = { view -> view.release() },
@@ -153,11 +165,36 @@ internal fun SessionScreen(
 
         // §4.5 — 세그먼트 링 대신 선형 진행바를 쓴다. 남은 횟수는 숫자로 같이 보여 준다.
         ProgressBar(fraction = ui.progressFraction)
+        // "남은 306회"는 쓸 수 없는 숫자다. 회차와 문장 번호로 보여 준다.
         Text(
-            "${ui.completedCounts} / ${ui.targetCounts} · 남은 ${ui.remainingCounts}회",
+            "${ui.currentRep}회차 / ${ui.totalReps}회 · 문장 ${ui.currentSentenceNumber}/${ui.sentenceCount}",
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.padding(top = 8.dp),
         )
+        if (dailyTargetSec > 0) {
+            Text(
+                if (ui.dailyGoalMet) {
+                    "오늘 목표를 채웠습니다. 여기서 멈춰도 됩니다."
+                } else {
+                    "오늘 목표까지 ${ui.remainingDailySec}초"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (ui.dailyGoalMet) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+        ui.playbackNotice?.let { notice ->
+            Text(
+                "$notice 자막만 보고 이어서 연습합니다.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
 
         Spacer(Modifier.height(20.dp))
         Text(stageLabel(ui.stage, options), style = MaterialTheme.typography.titleMedium)
@@ -225,7 +262,7 @@ internal fun SessionScreen(
         }
 
         TextButton(onClick = { onFinished(controller.achievedSec, controller.completedCounts) }) {
-            Text("여기까지 하기")
+            Text(if (ui.dailyGoalMet) "오늘 목표 달성 · 마치기" else "여기까지 하기")
         }
     }
 }

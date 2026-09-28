@@ -30,6 +30,10 @@ public sealed interface SessionEvent {
 public class SessionEngine(
     private val plan: VideoPlan,
     private val options: SessionOptions = SessionOptions(),
+    /** 오늘 이미 쌓은 발화 시간. 세션 중에 목표 달성을 알리기 위해 받는다. */
+    private val dailyAlreadySec: Int = 0,
+    /** 오늘의 목표. 0이면 달성 판정을 하지 않는다. */
+    private val dailyTargetSec: Int = 0,
     private val steps: List<SessionStep> = SessionPlan.expand(plan),
 ) {
     private var stepCursor: Int = 0
@@ -64,6 +68,34 @@ public class SessionEngine(
 
     /** §4.5 — 세그먼트 링 진행바가 쓰는 값. */
     public val targetCounts: Int = steps.count { it.countsTowardTarget }
+
+    /** 이 영상을 몇 번 반복하는가. 화면에 보여 줄 숫자는 카운트가 아니라 이쪽이다. */
+    public val totalReps: Int = plan.targetReps.coerceAtLeast(1)
+
+    public val sentenceCount: Int = plan.sentences.size
+
+    /** 지금 몇 회차인가 (1부터). */
+    public val currentRep: Int get() = (currentStep?.repIndex ?: 0) + 1
+
+    /** 이번 회차에서 몇 번째 문장인가 (1부터). */
+    public val currentSentenceNumber: Int get() = (currentStep?.sentenceIndex ?: 0) + 1
+
+    /**
+     * 오늘 목표를 채웠는가.
+     *
+     * §4.2.1 — 예산은 상한이 아니라 목표값이다. 그래서 세션을 강제로 끝내지 않고
+     * **끝낼 수 있다고 알리기만 한다.** 더 하고 싶으면 그대로 두면 된다.
+     *
+     * 이 판정이 필요한 이유는 반복 횟수가 커질 수 있기 때문이다. 문장 17개짜리 영상에
+     * 18회 반복이면 카운트가 306이 되고, 한 카운트가 3단계이므로 900번 넘는 상호작용이
+     * 된다. 목표를 채운 지점을 알려 주지 않으면 사용자는 언제 멈춰야 할지 알 수 없다.
+     */
+    public val dailyGoalMet: Boolean
+        get() = dailyTargetSec > 0 && dailyAlreadySec + achievedSec >= dailyTargetSec
+
+    /** 오늘 목표까지 남은 발화 시간(초). 목표를 이미 넘겼으면 0. */
+    public val remainingDailySec: Int
+        get() = (dailyTargetSec - dailyAlreadySec - achievedSec).coerceAtLeast(0)
 
     public val remainingCounts: Int get() = (targetCounts - completedCounts).coerceAtLeast(0)
 
