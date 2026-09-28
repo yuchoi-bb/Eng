@@ -13,7 +13,9 @@ activityCompose = "1.9.3"
 lifecycle = "2.8.7"
 media3 = "1.5.1"
 coreKtx = "1.15.0"
-youtubePlayer = "12.1.2"
+# 13.0.0부터 origin이 앱 패키지명이 된다. 12.x는 youtube.com을 사칭해 2025년 9월 이후
+# 모든 임베드가 "동영상을 볼 수 없습니다"로 거부됐다 (android-youtube-player #1252).
+youtubePlayer = "13.0.0"
 
 [libraries]
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }

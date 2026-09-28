@@ -63,7 +63,9 @@ internal class YouTubeSourcePlayback(
                     }
                 }
             },
-            IFramePlayerOptions.Builder()
+            // 13.0.0부터 Builder가 context를 받는다. origin을 앱 패키지명(https://com.myna)으로
+            // 채우기 위해서다. origin을 직접 넣지 않는다 — youtube.com으로 넣으면 다시 거부된다.
+            IFramePlayerOptions.Builder(view.context)
                 .controls(0)   // 세션 중에는 사용자가 재생을 건드리지 않는다
                 .rel(0)
                 .build(),
@@ -111,7 +113,11 @@ internal class YouTubeSourcePlayback(
 
     private fun describe(error: PlayerConstants.PlayerError): String = when (error) {
         PlayerConstants.PlayerError.VIDEO_NOT_PLAYABLE_IN_EMBEDDED_PLAYER ->
-            "이 영상은 앱 안에서 재생할 수 없습니다. 영상 주인이 외부 재생을 막아 둔 경우입니다."
+            "이 영상은 앱 안 재생이 허용되지 않았습니다. 영상 주인이 막아 둔 경우입니다."
+
+        // 앱이 유튜브에 자기를 밝히지 못했다는 뜻이다. 영상 문제가 아니라 앱 문제다.
+        PlayerConstants.PlayerError.REQUEST_MISSING_HTTP_REFERER ->
+            "유튜브가 이 앱의 재생 요청을 받아 주지 않았습니다. 앱을 최신 버전으로 올려 주세요."
 
         PlayerConstants.PlayerError.VIDEO_NOT_FOUND ->
             "영상을 찾을 수 없습니다. 비공개로 바뀌었거나 삭제됐을 수 있습니다."
@@ -122,6 +128,7 @@ internal class YouTubeSourcePlayback(
         PlayerConstants.PlayerError.HTML_5_PLAYER ->
             "플레이어를 띄우지 못했습니다."
 
+        // 152처럼 라이브러리 오류 표에 없는 코드는 여기로 온다. 원인을 단정하지 않는다.
         PlayerConstants.PlayerError.UNKNOWN ->
             "영상을 재생하지 못했습니다."
     }
