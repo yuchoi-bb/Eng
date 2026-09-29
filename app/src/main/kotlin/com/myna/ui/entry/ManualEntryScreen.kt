@@ -6,6 +6,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -56,6 +57,7 @@ import com.myna.media.SourcePlayback
 import com.myna.transcribe.TranscribeResult
 import kotlinx.coroutines.launch
 import java.util.Locale
+import kotlin.math.roundToInt
 import java.util.UUID
 
 /**
@@ -173,7 +175,8 @@ internal fun ManualEntryScreen(
     fun nudge(draft: SentenceDraft, start: Boolean, deltaSec: Double) {
         val field = if (start) draft.startSec else draft.endSec
         val value = field.trim().toDoubleOrNull() ?: return
-        val moved = secondsText(((value + deltaSec).coerceAtLeast(0.0) * 1000).toInt())
+        // 0.1을 여러 번 더하면 12.300000000000001처럼 오차가 쌓인다. 밀리초로 반올림해 둔다.
+        val moved = secondsText(((value + deltaSec).coerceAtLeast(0.0) * 1000).roundToInt())
         if (start) draft.startSec = moved else draft.endSec = moved
         // 옮기자마자 들어 봐야 맞았는지 안다.
         preview(draft)
@@ -299,7 +302,7 @@ internal fun ManualEntryScreen(
                 Text(
                     if (hasSource) {
                         "따라 할 필요 없는 문장(인사, 구독 요청 등)은 지우세요. ▶로 들어 보고 " +
-                            "시작·끝이 어긋나면 ±0.5초로 옮기면 바로 다시 들려줍니다."
+                            "시작·끝이 어긋나면 ±0.5초로 크게, ±0.1초로 잘게 옮기면 바로 다시 들려줍니다."
                     } else {
                         "영상에서 들리는 문장과 시각을 적어 주세요. 한 문장씩 나눠 적을수록 반복이 쉬워집니다."
                     },
@@ -541,16 +544,27 @@ private fun TimeField(
             modifier = Modifier.fillMaxWidth(),
         )
         if (canNudge) {
-            // 손가락으로 소수점을 고치기는 번거롭다. 0.5초씩 옮기고 바로 들어 본다.
+            // 손가락으로 소수점을 고치기는 번거롭다. 크게(0.5초)·잘게(0.1초) 옮기고 바로 들어 본다.
             Row(Modifier.fillMaxWidth()) {
-                TextButton(onClick = { onNudge(-NUDGE_SEC) }, modifier = Modifier.weight(1f)) { Text("−0.5") }
-                TextButton(onClick = { onNudge(NUDGE_SEC) }, modifier = Modifier.weight(1f)) { Text("+0.5") }
+                NUDGE_STEPS.forEach { step ->
+                    TextButton(
+                        onClick = { onNudge(step) },
+                        // 네 개가 반 폭에 들어가야 한다. 기본 여백이면 글자가 잘린다.
+                        contentPadding = PaddingValues(horizontal = 0.dp),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(nudgeLabel(step), style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                    }
+                }
             }
         }
     }
 }
 
-private const val NUDGE_SEC = 0.5
+/** 시작·끝을 옮기는 간격(초). 크게 맞춘 뒤 잘게 다듬는다. */
+private val NUDGE_STEPS = listOf(-0.5, -0.1, 0.1, 0.5)
+
+private fun nudgeLabel(step: Double): String = if (step < 0) "−${-step}" else "+$step"
 
 /** 밀리초를 입력칸에 넣을 초 문자열로. 12000 → "12", 12500 → "12.5". */
 private fun secondsText(ms: Int): String {
