@@ -52,12 +52,9 @@ public class ShadowingRepository(private val store: LocalStore) {
 
     public fun localMediaUri(planId: String): String? = _state.value.localMediaUris[planId]
 
-    public fun recordUpdateCheck(epochMs: Long) {
-        mutate { it.copy(lastUpdateCheckEpochMs = epochMs) }
-    }
-
-    public fun skipUpdateVersion(version: String) {
-        mutate { it.copy(skippedUpdateVersion = version) }
+    /** 업데이트를 확인했다. 결과는 설정 화면에 보여 줘서 업데이트가 안 올 때 이유를 알 수 있게 한다. */
+    public fun recordUpdateCheck(epochMs: Long, outcome: String) {
+        mutate { it.copy(lastUpdateCheckEpochMs = epochMs, lastUpdateOutcome = outcome) }
     }
 
     // ---------- 현장 메모 ----------

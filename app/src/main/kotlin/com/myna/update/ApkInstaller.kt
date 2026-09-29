@@ -1,8 +1,10 @@
 package com.myna.update
 
 import android.app.DownloadManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageInstaller
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -46,6 +48,11 @@ internal class ApkInstaller(private val context: Context) {
         val fileName = "myna-v${update.version}.apk"
         // 앱 전용 외부 저장소. 권한이 필요 없고, 앱을 지우면 함께 사라진다.
         val target = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), fileName)
+        // 설치 권한을 켜러 다녀온 경우처럼 이미 다 받아 둔 파일이면 다시 받지 않는다.
+        if (target.exists() && update.sizeBytes > 0 && target.length() == update.sizeBytes) {
+            onProgress(DownloadState.Ready(target))
+            return target
+        }
         if (target.exists()) target.delete()
 
         val request = DownloadManager.Request(Uri.parse(update.downloadUrl))
@@ -98,7 +105,12 @@ internal class ApkInstaller(private val context: Context) {
     }
 
     /**
-     * 설치 화면을 연다.
+     * 설치한다.
+     *
+     * [PackageInstaller] 세션으로 넘긴다. 파일을 여는 방식(ACTION_VIEW)은 매번 설치 확인
+     * 화면을 띄우지만, 세션 방식은 **이 앱이 자기 자신을 설치한 적이 있으면** 안드로이드 12부터
+     * 확인 없이 바로 설치된다. 처음 한 번(브라우저로 설치한 앱)은 확인 화면이 뜬다 —
+     * [InstallResultReceiver]가 그 화면을 띄운다.
      *
      * 사이드로드 설치는 사용자가 "출처를 알 수 없는 앱"을 이 앱에 대해 허용해야 한다.
      * 허용 전이면 설치 시도가 조용히 실패하므로, 먼저 그 설정 화면으로 보낸다.
@@ -116,19 +128,62 @@ internal class ApkInstaller(private val context: Context) {
         }
 
         return runCatching {
-            val uri = FileProvider.getUriForFile(context, "${context.packageName}.updates", file)
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, APK_MIME)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            InstallResult.Launch(intent)
+            commitSession(file)
+            InstallResult.Committed
         }.getOrElse { error ->
-            Log.e(TAG, "설치 화면을 열지 못했습니다.", error)
-            InstallResult.Failed(error.message ?: "설치를 시작하지 못했습니다.")
+            // 세션을 못 쓰는 기기라면 예전처럼 파일을 설치 화면에 넘긴다.
+            Log.w(TAG, "설치 세션을 쓰지 못해 설치 화면으로 넘깁니다.", error)
+            viewIntent(file)
         }
     }
 
+    private fun commitSession(file: File) {
+        val installer = context.packageManager.packageInstaller
+        val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
+            setAppPackageName(context.packageName)
+            setSize(file.length())
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                // 자기 자신의 업데이트는 확인 없이 설치해 달라고 요청한다. 조건이 안 맞으면
+                // (처음 한 번 등) 시스템이 알아서 확인 화면을 요구한다.
+                setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+            }
+        }
+        val sessionId = installer.createSession(params)
+        try {
+            installer.openSession(sessionId).use { session ->
+                session.openWrite("base.apk", 0, file.length()).use { out ->
+                    file.inputStream().use { input -> input.copyTo(out) }
+                    session.fsync(out)
+                }
+                val callback = Intent(context, InstallResultReceiver::class.java)
+                    .setPackage(context.packageName)
+                // 시스템이 결과를 extras에 채워 넣으므로 mutable이어야 한다. 대상은 명시적이다.
+                val mutable = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0
+                val flags = PendingIntent.FLAG_UPDATE_CURRENT or mutable
+                val pending = PendingIntent.getBroadcast(context, sessionId, callback, flags)
+                session.commit(pending.intentSender)
+            }
+        } catch (error: Exception) {
+            runCatching { installer.abandonSession(sessionId) }
+            throw error
+        }
+    }
+
+    private fun viewIntent(file: File): InstallResult = runCatching {
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.updates", file)
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, APK_MIME)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        InstallResult.Launch(intent)
+    }.getOrElse { error ->
+        Log.e(TAG, "설치 화면을 열지 못했습니다.", error)
+        InstallResult.Failed(error.message ?: "설치를 시작하지 못했습니다.")
+    }
+
     internal sealed interface InstallResult {
+        /** 설치 세션에 넘겼다. 결과는 [InstallResultReceiver]로 온다. */
+        data object Committed : InstallResult
         data class Launch(val intent: Intent) : InstallResult
         data class NeedsPermission(val settingsIntent: Intent) : InstallResult
         data class Failed(val message: String) : InstallResult

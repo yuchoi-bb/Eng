@@ -38,4 +38,15 @@ class UpdatePolicyTest {
         // last가 미래면 뺄셈이 음수가 되어 영영 확인하지 않는 상태가 된다.
         assertTrue(UpdatePolicy.shouldCheck(now + 60L * 60 * 1000, now))
     }
+
+    @Test
+    fun `와이파이에서는 묻지 않고 받는다`() {
+        assertTrue(UpdatePolicy.downloadsWithoutAsking(meteredNetwork = false))
+    }
+
+    @Test
+    fun `모바일 데이터에서는 먼저 묻는다`() {
+        // 로밍 중에 10MB를 말없이 받으면 안 된다.
+        assertFalse(UpdatePolicy.downloadsWithoutAsking(meteredNetwork = true))
+    }
 }

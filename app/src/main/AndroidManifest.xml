@@ -15,6 +15,12 @@
     -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!--
+      안드로이드 14부터 자기 자신의 업데이트를 확인 화면 없이 설치하려면 이 권한이 필요하다.
+      설치 시 자동으로 부여되는 권한이라 사용자에게 묻지 않는다.
+    -->
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
+
     <application
         android:name=".MynaApplication"
         android:allowBackup="true"
@@ -49,6 +55,11 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
+
+        <!-- 설치 세션의 결과. 확인이 필요하면 확인 화면을 띄운다. 이 앱 안에서만 부른다. -->
+        <receiver
+            android:name=".update.InstallResultReceiver"
+            android:exported="false" />
 
         <!-- 내려받은 APK를 패키지 설치 화면에 넘기는 통로. -->
         <provider

@@ -37,8 +37,10 @@ public data class AppState(
     val localMediaUris: Map<String, String> = emptyMap(),
     /** 마지막으로 새 버전을 확인한 시각. 기기마다 다르므로 동기화 대상이 아니다. */
     val lastUpdateCheckEpochMs: Long? = null,
-    /** 사용자가 건너뛴 버전. 그 다음 버전이 나오면 다시 묻는다. */
+    /** 사용자가 건너뛴 버전. v0.6.1부터 쓰지 않는다 — 새 버전은 자동으로 받는다. 구버전 파일 호환용. */
     val skippedUpdateVersion: String? = null,
+    /** 마지막 업데이트 확인 결과("최신 버전입니다", "확인하지 못했습니다 (…)"). 설정 화면에 보여 준다. */
+    val lastUpdateOutcome: String? = null,
     /** 현장에서 막힌 순간의 기록. 최신이 앞. */
     val fieldNotes: List<FieldNote> = emptyList(),
     /**

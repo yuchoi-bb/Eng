@@ -27,4 +27,13 @@ public object UpdatePolicy {
         if (nowEpochMs < last) return true
         return nowEpochMs - last >= MIN_INTERVAL_MS
     }
+
+    /**
+     * 새 버전을 묻지 않고 바로 내려받는가.
+     *
+     * 와이파이면 받는다 — 사용자가 매번 "받아서 설치"를 눌러야 하면 업데이트가 밀린다.
+     * **데이터 요금이 붙는 회선이면 먼저 묻는다.** 출장·여행 중 로밍으로 10MB를 말없이
+     * 받으면 안 된다.
+     */
+    public fun downloadsWithoutAsking(meteredNetwork: Boolean): Boolean = !meteredNetwork
 }

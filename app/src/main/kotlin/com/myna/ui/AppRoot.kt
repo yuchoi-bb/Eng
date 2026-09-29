@@ -64,6 +64,8 @@ internal fun AppRoot(
     val transcriber = remember(apiKeys) { GeminiTranscriber(apiKeys) }
     // 키가 바뀌면 화면이 다시 그려져야 한다. 설정 저장 시 이 값을 올린다.
     var keyRevision by remember { mutableStateOf(0) }
+    // 설정의 "새 버전 지금 확인"을 누를 때마다 오른다.
+    var updateCheckRequest by remember { mutableStateOf(0) }
     val online by networkMonitor.observe().collectFlowAsState(initial = networkMonitor.isOnline())
 
     var screen: Screen by remember {
@@ -84,9 +86,10 @@ internal fun AppRoot(
     // 사이드로드 배포라 자동 업데이트가 없다. 새 릴리즈가 나오면 앱이 직접 묻는다.
     UpdateGate(
         lastCheckedEpochMs = state.lastUpdateCheckEpochMs,
-        skippedVersion = state.skippedUpdateVersion,
+        // 설치하면 앱이 닫힌다. 연습 중에는 받아만 두고 나간 뒤에 설치한다.
+        inSession = screen is Screen.Session,
+        checkRequest = updateCheckRequest,
         onChecked = repository::recordUpdateCheck,
-        onSkipVersion = repository::skipUpdateVersion,
     )
 
     when (val current = screen) {
@@ -214,9 +217,9 @@ internal fun AppRoot(
         }
 
         Screen.ApiKeySettings -> ApiKeyScreen(
-            updateStatus = updateStatusText(state.lastUpdateCheckEpochMs, state.skippedUpdateVersion),
-            // 마지막 확인 시각을 지우면 다음 ON_START에서 바로 다시 확인한다.
-            onCheckUpdate = { repository.recordUpdateCheck(0L) },
+            updateStatus = updateStatusText(state.lastUpdateCheckEpochMs, state.lastUpdateOutcome),
+            // 다음 화면 복귀를 기다리지 않고 바로 확인한다.
+            onCheckUpdate = { updateCheckRequest += 1 },
             currentKey = remember(keyRevision) { apiKeys.geminiKey },
             currentModel = remember(keyRevision) { apiKeys.modelOverride },
             resolvedModel = remember(keyRevision) { apiKeys.resolvedModel },
@@ -274,18 +277,18 @@ internal fun AppRoot(
 }
 
 /** 설정 화면에 보여 줄 업데이트 상태 한 줄. */
-private fun updateStatusText(lastCheckedEpochMs: Long?, skippedVersion: String?): String {
+private fun updateStatusText(lastCheckedEpochMs: Long?, outcome: String?): String {
     val checked = when {
-        lastCheckedEpochMs == null || lastCheckedEpochMs == 0L -> "아직 확인하지 않았습니다"
+        lastCheckedEpochMs == null || lastCheckedEpochMs == 0L -> null
         else -> {
             val minutes = (System.currentTimeMillis() - lastCheckedEpochMs) / 60_000
             when {
-                minutes < 1 -> "방금 확인했습니다"
-                minutes < 60 -> "${minutes}분 전에 확인했습니다"
-                else -> "${minutes / 60}시간 전에 확인했습니다"
+                minutes < 1 -> "방금 확인"
+                minutes < 60 -> "${minutes}분 전 확인"
+                else -> "${minutes / 60}시간 전 확인"
             }
         }
     }
-    val skipped = skippedVersion?.let { " · v$it 은 건너뛰는 중" }.orEmpty()
-    return "앱을 켤 때마다 새 버전을 확인합니다. $checked$skipped"
+    val last = listOfNotNull(checked, outcome).joinToString(" · ").ifEmpty { "아직 확인하지 않았습니다" }
+    return "앱을 켤 때마다 새 버전을 확인하고, 와이파이면 알아서 받아 설치합니다.\n$last"
 }

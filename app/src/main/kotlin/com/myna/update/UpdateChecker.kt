@@ -17,6 +17,13 @@ internal data class AvailableUpdate(
     val releaseUrl: String?,
 )
 
+/** 확인 결과. 설정 화면에 그대로 보여 줘서, 업데이트가 안 올 때 이유를 알 수 있게 한다. */
+internal sealed interface CheckResult {
+    data class Available(val update: AvailableUpdate) : CheckResult
+    data object UpToDate : CheckResult
+    data class Failed(val reason: String) : CheckResult
+}
+
 /**
  * GitHub 릴리즈에서 새 버전을 찾는다.
  *
@@ -28,34 +35,36 @@ internal class UpdateChecker(
     private val currentVersion: String,
 ) {
     /**
-     * 새 버전이 있으면 돌려주고, 없거나 확인에 실패하면 null.
+     * 새 버전이 있는지 본다.
      *
      * **실패를 예외로 올리지 않는다.** 업데이트 확인은 부수적인 기능이고, 비행기 모드나
-     * GitHub 장애 때문에 학습을 막으면 안 된다.
+     * GitHub 장애 때문에 학습을 막으면 안 된다. 대신 이유를 [CheckResult.Failed]로 남긴다 —
+     * 조용히 삼키면 업데이트가 왜 안 오는지 알 길이 없다.
      */
-    suspend fun check(): AvailableUpdate? = withContext(Dispatchers.IO) {
-        runCatching { fetchLatest() }
-            .onFailure { Log.i(TAG, "업데이트 확인을 건너뜁니다: ${it.message}") }
-            .getOrNull()
-            ?.let { release ->
-                val tag = release.tagName ?: return@let null
-                if (release.draft) return@let null
-                if (!AppVersion.isNewer(currentVersion, tag)) return@let null
-
-                val asset = release.apkAsset ?: run {
-                    Log.w(TAG, "릴리즈 $tag 에 APK가 첨부되어 있지 않습니다.")
-                    return@let null
-                }
-                val url = asset.downloadUrl ?: return@let null
-
-                AvailableUpdate(
-                    version = tag.removePrefix("v"),
-                    downloadUrl = url,
-                    sizeBytes = asset.size,
-                    notes = release.body?.takeIf { it.isNotBlank() },
-                    releaseUrl = release.htmlUrl,
-                )
-            }
+    suspend fun check(): CheckResult = withContext(Dispatchers.IO) {
+        val release = runCatching { fetchLatest() }.getOrElse { error ->
+            Log.i(TAG, "업데이트 확인 실패: ${error.message}")
+            return@withContext CheckResult.Failed(error.message ?: error.javaClass.simpleName)
+        }
+        val tag = release.tagName ?: return@withContext CheckResult.Failed("릴리즈에 태그가 없습니다")
+        if (release.draft || !AppVersion.isNewer(currentVersion, tag)) {
+            return@withContext CheckResult.UpToDate
+        }
+        val asset = release.apkAsset
+        val url = asset?.downloadUrl
+        if (asset == null || url == null) {
+            Log.w(TAG, "릴리즈 $tag 에 APK가 첨부되어 있지 않습니다.")
+            return@withContext CheckResult.Failed("$tag 에 APK가 없습니다")
+        }
+        CheckResult.Available(
+            AvailableUpdate(
+                version = tag.removePrefix("v"),
+                downloadUrl = url,
+                sizeBytes = asset.size,
+                notes = release.body?.takeIf { it.isNotBlank() },
+                releaseUrl = release.htmlUrl,
+            ),
+        )
     }
 
     private fun fetchLatest(): GitHubRelease {
