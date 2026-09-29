@@ -28,6 +28,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,7 +40,9 @@ import androidx.annotation.OptIn
 import androidx.core.content.ContextCompat
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
+import com.myna.core.model.PlanPosition
 import com.myna.core.model.VideoPlan
+import com.myna.core.session.SessionEvent
 import com.myna.core.session.SessionOptions
 import com.myna.core.session.ShadowingStage
 import com.myna.core.session.VoiceMode
@@ -64,13 +67,35 @@ internal fun SessionScreen(
     showTransliteration: Boolean,
     dailyAlreadySec: Int,
     dailyTargetSec: Int,
+    /** 이어서 할 자리. null이면 처음부터. */
+    startAt: PlanPosition?,
+    /** 오프라인 복습에서 들어 본 문장만 돌 때. null이면 전부. */
+    sentenceFilter: Set<Int>?,
     onKeepScreenOn: (Boolean) -> Unit,
-    onSentenceCleared: (sentenceIndex: Int) -> Unit,
-    onFinished: (achievedSec: Int, counts: Int) -> Unit,
+    /** 한 문장을 끝낼 때마다 — 그 자리에서 저장한다. */
+    onCountCompleted: (SessionEvent.CountCompleted) -> Unit,
+    onMemorizedChanged: (sentenceIndex: Int, memorized: Boolean) -> Unit,
+    onExit: () -> Unit,
 ) {
     val context = LocalContext.current
+    // 컨트롤러는 세션 동안 한 번만 만든다. 콜백은 최신 것을 부르도록 감싸 둔다.
+    val latestOnCount by rememberUpdatedState(onCountCompleted)
+    val latestOnMemorized by rememberUpdatedState(onMemorizedChanged)
     val controller = remember(plan.id.value) {
-        SessionController(context, plan, playbackRate, options, dailyAlreadySec, dailyTargetSec)
+        SessionController(
+            context = context,
+            plan = plan,
+            playbackRate = playbackRate,
+            options = options,
+            // 세션을 시작할 때의 값으로 고정한다. 카운트마다 저장되므로 매번 새 값을 받으면
+            // 이번 세션의 발화 시간이 두 번 더해진다.
+            dailyAlreadySec = dailyAlreadySec,
+            dailyTargetSec = dailyTargetSec,
+            startAt = startAt,
+            sentenceFilter = sentenceFilter,
+            onCountCompleted = { latestOnCount(it) },
+            onMemorizedChanged = { index, memorized -> latestOnMemorized(index, memorized) },
+        )
     }
     val ui by controller.uiState
 
@@ -105,13 +130,9 @@ internal fun SessionScreen(
         }
     }
 
-    // 한 문장을 완주할 때마다 알린다. 오프라인에서 무엇을 복습할 수 있는지가 여기서 정해진다.
-    LaunchedEffect(ui.clearedSentenceIndex) {
-        ui.clearedSentenceIndex?.let(onSentenceCleared)
-    }
-
+    // 진행은 문장마다 이미 저장됐다. 끝나면 나가기만 한다.
     LaunchedEffect(ui.finished) {
-        if (ui.finished) onFinished(controller.achievedSec, controller.completedCounts)
+        if (ui.finished) onExit()
     }
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
@@ -126,7 +147,7 @@ internal fun SessionScreen(
             when (activeSource) {
                 // 원본이 없는 세션(오프라인 복습, 현장 메모 연습)은 재생할 것이 없다.
                 null -> Text(
-                    if (options.sourceAudioAvailable) "" else "원본 없이 복습합니다",
+                    if (options.sourceAudioAvailable) "" else "원본 없이 연습합니다",
                     style = MaterialTheme.typography.bodyMedium,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth(),
@@ -187,7 +208,8 @@ internal fun SessionScreen(
         ProgressBar(fraction = ui.progressFraction)
         // "남은 306회"는 쓸 수 없는 숫자다. 회차와 문장 번호로 보여 준다.
         Text(
-            "${ui.currentRep}회차 / ${ui.totalReps}회 · 문장 ${ui.currentSentenceNumber}/${ui.sentenceCount}",
+            "${ui.currentRep}회차 / ${ui.totalReps}회 · 문장 ${ui.currentSentenceNumber}/${ui.sentenceCount}" +
+                if (ui.memorizedCount > 0) " · 외운 문장 ${ui.memorizedCount}" else "",
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.padding(top = 8.dp),
         )
@@ -217,7 +239,7 @@ internal fun SessionScreen(
         }
 
         Spacer(Modifier.height(12.dp))
-        Text(stageLabel(ui.stage, options), style = MaterialTheme.typography.titleMedium)
+        Text(stageLabel(ui, options), style = MaterialTheme.typography.titleMedium)
 
         Spacer(Modifier.height(8.dp))
         Box(Modifier.fillMaxWidth().heightIn(min = 120.dp), contentAlignment = Alignment.Center) {
@@ -265,7 +287,8 @@ internal fun SessionScreen(
             }
         } else {
             Text(
-                "재생 중…",
+                // 외운 문장의 비교 재생 — 방금 내가 한 말과 같은지 들어 본다.
+                if (ui.checking) "원본과 같은지 들어 보세요…" else "재생 중…",
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
@@ -285,27 +308,46 @@ internal fun SessionScreen(
             // L1 — 원본과 내 녹음을 번갈아 듣는다.
             OutlinedButton(
                 onClick = { controller.playbackComparison() },
-                enabled = !ui.recording && ui.hasRecording,
+                // 외운 문장의 비교 재생 중에 누르면 그 걸음이 카운트 없이 처음으로 돌아간다.
+                enabled = !ui.recording && !ui.checking && ui.hasRecording,
                 modifier = Modifier.weight(1f),
             ) {
                 Text("내 녹음과 비교")
             }
         }
 
-        TextButton(onClick = { onFinished(controller.achievedSec, controller.completedCounts) }) {
-            Text(if (ui.dailyGoalMet) "오늘 목표 달성 · 마치기" else "여기까지 하기")
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            if (ui.memorized) {
+                // 막혔으면 외운 문장 표시를 풀고 듣고 따라 하기로 돌아간다.
+                TextButton(onClick = { controller.unmarkMemorized() }, modifier = Modifier.weight(1f)) {
+                    Text("헷갈려요")
+                }
+            } else {
+                // 자막 없이 말할 수 있으면 외운 것이다. 다음 회차부터 듣지 않고 바로 말한다.
+                TextButton(
+                    onClick = { controller.markMemorized() },
+                    enabled = !ui.finished,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("외웠어요")
+                }
+            }
+            // 진행은 문장마다 저장되므로 언제 나가도 다음에 이 자리에서 이어서 한다.
+            TextButton(onClick = onExit, modifier = Modifier.weight(1f)) {
+                Text(if (ui.dailyGoalMet) "목표 달성 · 마치기" else "여기까지 하기")
+            }
         }
     }
 }
 
-private fun stageLabel(stage: ShadowingStage, options: SessionOptions): String {
-    val step = options.stages.indexOf(stage) + 1
-    val total = options.stages.size
+private fun stageLabel(ui: SessionUiState, options: SessionOptions): String {
     val whisper = options.voiceMode == VoiceMode.WHISPER
-    val action = when (stage) {
+    val action = when (ui.stage) {
         ShadowingStage.LISTEN -> "듣기만"
-        ShadowingStage.SHADOW_WITH_TEXT -> if (whisper) "보면서 입모양으로" else "보면서 따라 말하기"
+        ShadowingStage.SHADOW_WITH_TEXT -> if (whisper) "보면서 입모양으로" else "듣고 보면서 따라 말하기"
         ShadowingStage.SHADOW_NO_TEXT -> if (whisper) "자막 끄고 입모양으로" else "자막 끄고 따라 말하기"
+        ShadowingStage.RECALL -> if (whisper) "외운 문장 · 입모양으로 바로" else "외운 문장 · 듣지 않고 바로 말하기"
     }
-    return "$step/${total}단계 · $action"
+    // 외운 문장은 단계가 하나뿐이다. "1/1단계"는 군더더기다.
+    return if (ui.stageCount <= 1) action else "${ui.stageNumber}/${ui.stageCount}단계 · $action"
 }

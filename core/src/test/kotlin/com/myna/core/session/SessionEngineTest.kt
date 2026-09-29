@@ -2,6 +2,7 @@ package com.myna.core.session
 
 import com.myna.core.model.BreathGroup
 import com.myna.core.model.VideoType
+import com.myna.core.completeStep
 import com.myna.core.plan
 import com.myna.core.sentence
 import com.myna.core.transcript
@@ -82,8 +83,7 @@ class SessionEngineTest {
         assertEquals(3, engine.targetCounts) // 조각 2개는 빠진다
 
         // 첫 걸음은 호흡 조각이다.
-        repeat(engine.stagesPerCount - 1) { engine.completeStage() }
-        assertIs<SessionEvent.BreathGroupCompleted>(engine.completeStage())
+        assertIs<SessionEvent.BreathGroupCompleted>(engine.completeStep())
         assertEquals(0, engine.completedCounts)
     }
 
@@ -131,14 +131,14 @@ class SessionEngineTest {
         val engine = SessionEngine(plan(targetReps = 3))
         assertEquals(3, engine.remainingCounts)
 
-        repeat(engine.stagesPerCount) { engine.completeStage() }
+        engine.completeStep()
         assertEquals(2, engine.remainingCounts)
     }
 
     @Test
     fun `모든 걸음을 끝내면 세션이 종료된다`() {
         val engine = SessionEngine(plan(targetReps = 2))
-        repeat(engine.stagesPerCount * 2) { engine.completeStage() }
+        repeat(2) { engine.completeStep() }
 
         assertTrue(engine.isFinished)
         assertEquals(2, engine.completedCounts)

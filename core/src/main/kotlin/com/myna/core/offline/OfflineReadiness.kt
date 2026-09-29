@@ -59,6 +59,19 @@ public object OfflineReadiness {
      * [SentenceId]로 문장을 찾는데, 그 키가 index를 담고 있기 때문이다.
      * 원본 계획은 그대로 두고 이 사본만 세션에 넘긴다.
      */
+    /**
+     * 오프라인에서 연습할 수 있는 문장 번호. 하나도 없으면 null.
+     *
+     * [practicablePlan]과 달리 번호를 다시 매기지 않는다. 세션이 원래 번호를 쓰면
+     * 외운 문장 표시와 이어서 하기 자리를 그대로 쓸 수 있다.
+     */
+    public fun practicableSentenceIndexes(plan: VideoPlan, clearedSentenceIds: Set<String>): Set<Int>? =
+        plan.sentences
+            .filter { SentenceId.of(plan.id, it.index).value in clearedSentenceIds }
+            .map { it.index }
+            .toSet()
+            .ifEmpty { null }
+
     public fun practicablePlan(plan: VideoPlan, clearedSentenceIds: Set<String>): VideoPlan? {
         val kept = plan.sentences.filter { sentence ->
             SentenceId.of(plan.id, sentence.index).value in clearedSentenceIds

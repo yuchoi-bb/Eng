@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
+import com.myna.core.model.PlanPosition
 import com.myna.core.model.Sentence
 import com.myna.core.model.SentenceId
 import com.myna.core.model.VideoPlan
@@ -30,8 +31,6 @@ internal data class SessionUiState(
     val targetCounts: Int = 0,
     val remainingCounts: Int = 0,
     val finished: Boolean = false,
-    /** 방금 완주한 문장의 번호. 오프라인 복습 대상 판정에 쓰인다. */
-    val clearedSentenceIndex: Int? = null,
     /** 읽히는 진행 표시 — 카운트(306회)가 아니라 회차로 보여 준다. */
     val currentRep: Int = 1,
     val totalReps: Int = 1,
@@ -43,9 +42,19 @@ internal data class SessionUiState(
     /** 원본 재생이 거부됐을 때 보여 줄 안내. */
     val playbackNotice: String? = null,
     val playsSource: Boolean = true,
+    /** 이번 걸음의 몇 번째 단계인가, 모두 몇 단계인가. 회차와 외운 문장 여부에 따라 1~3이다. */
+    val stageNumber: Int = 1,
+    val stageCount: Int = 3,
+    /** 지금 문장을 외웠다고 표시했는가. */
+    val memorized: Boolean = false,
+    /** 말한 뒤에 원본을 들려주는 중이다 (외운 문장의 비교 재생). */
+    val checking: Boolean = false,
+    /** 영상 전체 기준 진행 — 이어서 하기로 건너뛴 앞부분까지 포함한다. */
+    val overallCompletedCounts: Int = 0,
+    val memorizedCount: Int = 0,
 ) {
     val progressFraction: Float
-        get() = if (targetCounts == 0) 0f else completedCounts.toFloat() / targetCounts
+        get() = if (targetCounts == 0) 0f else overallCompletedCounts.toFloat() / targetCounts
 }
 
 /**
@@ -62,20 +71,37 @@ internal class SessionController(
     private val options: SessionOptions = SessionOptions(),
     dailyAlreadySec: Int = 0,
     dailyTargetSec: Int = 0,
+    /** 이어서 할 자리. null이면 처음부터. */
+    startAt: PlanPosition? = null,
+    /** 오프라인 복습에서 들어 본 문장만 돌 때. null이면 전부. */
+    sentenceFilter: Set<Int>? = null,
+    /** 한 문장을 끝낼 때마다 — 그 자리에서 저장한다. */
+    private val onCountCompleted: (SessionEvent.CountCompleted) -> Unit = {},
+    /** 외웠어요 / 헷갈려요. */
+    private val onMemorizedChanged: (sentenceIndex: Int, memorized: Boolean) -> Unit = { _, _ -> },
 ) {
     private val recorder = SentenceRecorder(context)
     private val recordingPlayer = RecordingPlayer()
-    private val engine = SessionEngine(plan, options, dailyAlreadySec, dailyTargetSec)
+    private val engine = SessionEngine(
+        plan = plan,
+        options = options,
+        dailyAlreadySec = dailyAlreadySec,
+        dailyTargetSec = dailyTargetSec,
+        startAt = startAt,
+        sentenceFilter = sentenceFilter,
+    )
 
     /**
-     * 원본 재생을 포기했는가.
+     * 원본을 재생할 수 있는가.
      *
      * 유튜브가 임베드 재생을 거부하면 재생 완료 콜백이 오지 않아 세션이 듣기 단계에서
-     * 굳는다. 그때 자막만 보는 방식으로 넘어간다 — 오프라인 복습과 같은 경로다.
+     * 굳는다. 그때 엔진이 듣기 단계를 빼고 자막만 보는 방식으로 넘어간다 — 오프라인 복습과
+     * 같은 경로다.
      */
-    private var sourceGaveUp = false
+    private val playsSource: Boolean get() = engine.playsSource
 
-    private val playsSource: Boolean get() = options.sourceAudioAvailable && !sourceGaveUp
+    /** 말한 뒤 원본을 들려주는 중인가. */
+    private var isChecking = false
 
     /**
      * 원본 재생기. 화면이 뷰를 만든 뒤에 붙인다 — 업로드는 ExoPlayer, 유튜브는
@@ -112,17 +138,14 @@ internal class SessionController(
      * 듣기 단계는 들려줄 것이 없으므로 건너뛴다 — 빈 화면을 넘기게 하지 않기 위해서다.
      */
     fun onSourceRefused(reason: String) {
-        if (sourceGaveUp) return
-        sourceGaveUp = true
+        if (!engine.playsSource) return
         playbackNotice = reason
         source?.pause()
-
-        // 듣기 단계에서 굳어 있었다면 말하기로 넘긴다.
-        if (!engine.currentStage.isSpeaking) {
-            advance()
-        } else {
-            beginStage()
-        }
+        val wasChecking = isChecking
+        isChecking = false
+        // 듣기 단계에서 굳어 있었다면 엔진이 이번 걸음을 말하기부터 다시 짠다.
+        engine.dropSourceAudio()
+        if (wasChecking) advance() else beginStage()
     }
 
     private var playbackNotice: String? = null
@@ -142,23 +165,26 @@ internal class SessionController(
         val segment = segmentFor(step.unit, sentence)
 
         isRecording = false
+        isChecking = false
         _uiState.value = snapshot()
 
-        if (!playsSource) {
-            // 들려줄 원본이 없다. 자막을 띄운 채로 사용자가 말하기를 기다린다.
-            if (engine.requiresRecording) startRecording(step.sentenceIndex) else waitForUser()
+        if (!engine.playsBeforeStage) {
+            // 들려줄 원본이 없거나, 외운 문장이라 먼저 듣지 않는다. 바로 말하기를 기다린다.
+            speakNow(step.sentenceIndex)
             return
         }
 
-        source?.playSegment(segment, playbackRate) {
-            when {
-                engine.requiresRecording -> startRecording(step.sentenceIndex)
-                // 듣기 단계 — 재생이 끝나면 바로 다음 단계로.
-                !engine.currentStage.isSpeaking -> advance()
-                // 무음 모드의 말하기 단계 — 녹음하지 않고 사용자가 끝냈다고 알려 주길 기다린다.
-                else -> waitForUser()
-            }
-        }
+        source?.playSegment(segment, playbackRate) { afterPlayback(step.sentenceIndex) }
+    }
+
+    /** 원본을 들려준 뒤. 듣기 단계면 다음 단계로, 말하기 단계면 말할 차례다. */
+    private fun afterPlayback(sentenceIndex: Int) {
+        if (!engine.currentStage.isSpeaking) advance() else speakNow(sentenceIndex)
+    }
+
+    /** 말할 차례. 무음 모드는 녹음하지 않고 사용자가 끝냈다고 알려 주길 기다린다. */
+    private fun speakNow(sentenceIndex: Int) {
+        if (engine.requiresRecording) startRecording(sentenceIndex) else waitForUser()
     }
 
     /** 녹음이 없는 단계에서 "말하기 끝" 버튼을 띄운다. */
@@ -201,6 +227,18 @@ internal class SessionController(
             recorder.stop(SentenceId.of(plan.id, step.sentenceIndex).value)
         }
         isRecording = false
+
+        // 외운 문장은 몇 회에 한 번, 말한 뒤에 원본을 들려준다 — 틀린 발음이 굳지 않게.
+        if (engine.checksAfterSpeaking && playsSource) {
+            val sentence = plan.sentences[step.sentenceIndex]
+            isChecking = true
+            _uiState.value = snapshot()
+            source?.playSegment(segmentFor(step.unit, sentence), playbackRate) {
+                isChecking = false
+                advance()
+            }
+            return
+        }
         advance()
     }
 
@@ -209,7 +247,7 @@ internal class SessionController(
             is SessionEvent.SessionFinished -> _uiState.value = snapshot().copy(finished = true)
             else -> {
                 if (event is SessionEvent.CountCompleted) {
-                    lastClearedSentenceIndex = event.sentenceIndex
+                    onCountCompleted(event)
                 }
                 if (engine.isFinished) {
                     _uiState.value = snapshot().copy(finished = true)
@@ -219,8 +257,6 @@ internal class SessionController(
             }
         }
     }
-
-    private var lastClearedSentenceIndex: Int? = null
 
     /** L1 — 원본 구간을 들려준 뒤 방금 내 녹음을 이어서 재생한다. */
     fun playbackComparison() {
@@ -249,13 +285,44 @@ internal class SessionController(
     fun replayCurrent() {
         val step = engine.currentStep ?: return
         if (!playsSource) return
-        if (isRecording && options.recordsVoice) {
-            recorder.stop(SentenceId.of(plan.id, step.sentenceIndex).value)
-        }
+        stopSpeakingWithoutCount(step.sentenceIndex)
         // 비교 재생 중이었다면 그 완료 콜백이 단계를 다시 시작하지 않도록 끊는다.
         recordingPlayer.release()
+        // 외운 문장도 다시 듣기를 누르면 듣고 나서 말한다.
         // 재생기의 완료 콜백은 playSegment가 새로 덮어쓴다 — 이전 재생의 콜백은 오지 않는다.
-        beginStage()
+        val sentence = plan.sentences[step.sentenceIndex]
+        isRecording = false
+        isChecking = false
+        _uiState.value = snapshot()
+        source?.playSegment(segmentFor(step.unit, sentence), playbackRate) {
+            afterPlayback(step.sentenceIndex)
+        }
+    }
+
+    /** 외웠어요 — 하던 걸음은 그대로 끝내고 다음 회차부터 바로 말하기만 한다. */
+    fun markMemorized() {
+        val index = engine.currentStep?.sentenceIndex ?: return
+        engine.markMemorized(index)
+        onMemorizedChanged(index, true)
+        _uiState.value = snapshot()
+    }
+
+    /** 헷갈려요 — 외운 문장 표시를 풀고, 지금 바로 말하기 중이었다면 듣고 따라 하기로 다시 한다. */
+    fun unmarkMemorized() {
+        val index = engine.currentStep?.sentenceIndex ?: return
+        stopSpeakingWithoutCount(index)
+        recordingPlayer.release()
+        val restarted = engine.unmarkMemorized(index)
+        onMemorizedChanged(index, false)
+        if (restarted) beginStage() else _uiState.value = snapshot()
+    }
+
+    /** 말하는 중이었다면 녹음을 닫는다. 카운트는 올리지 않는다. */
+    private fun stopSpeakingWithoutCount(sentenceIndex: Int) {
+        if (isRecording && options.recordsVoice) {
+            recorder.stop(SentenceId.of(plan.id, sentenceIndex).value)
+        }
+        isRecording = false
     }
 
     private fun latestRecordingFor(sentenceIndex: Int): File? =
@@ -283,7 +350,6 @@ internal class SessionController(
             targetCounts = engine.targetCounts,
             remainingCounts = engine.remainingCounts,
             finished = engine.isFinished,
-            clearedSentenceIndex = lastClearedSentenceIndex,
             currentRep = engine.currentRep,
             totalReps = engine.totalReps,
             currentSentenceNumber = engine.currentSentenceNumber,
@@ -292,6 +358,12 @@ internal class SessionController(
             remainingDailySec = engine.remainingDailySec,
             playbackNotice = playbackNotice,
             playsSource = playsSource,
+            stageNumber = engine.stageNumber,
+            stageCount = engine.stagesPerCount,
+            memorized = engine.isCurrentSentenceMemorized,
+            checking = isChecking,
+            overallCompletedCounts = engine.overallCompletedCounts,
+            memorizedCount = plan.sentences.indices.count { it in engine.memorizedSentences },
         )
     }
 }

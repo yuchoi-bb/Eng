@@ -60,4 +60,11 @@ class OfflineReadinessTest {
     fun `연습할 문장이 없으면 계획을 만들지 않는다`() {
         assertNull(OfflineReadiness.practicablePlan(threeSentences, emptySet()))
     }
+
+    @Test
+    fun `오프라인 문장 번호는 다시 매기지 않는다`() {
+        // 외운 문장 표시와 이어서 하기 자리가 원래 번호를 쓰기 때문이다.
+        assertEquals(setOf(0, 2), OfflineReadiness.practicableSentenceIndexes(threeSentences, cleared(0, 2)))
+        assertNull(OfflineReadiness.practicableSentenceIndexes(threeSentences, emptySet()))
+    }
 }

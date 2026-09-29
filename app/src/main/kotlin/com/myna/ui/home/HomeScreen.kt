@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.myna.BuildConfig
 import com.myna.core.daily.DailySpeechLog
+import com.myna.core.model.VideoPlan
 import com.myna.core.store.AppState
 import com.myna.ui.ProgressBar
 import com.myna.ui.formatDuration
@@ -116,15 +117,32 @@ internal fun HomeScreen(
                                 style = MaterialTheme.typography.bodyLarge,
                             )
                             Text(
-                                "문장 ${plan.sentences.size}개 · 목표 ${plan.targetReps}회 · " +
-                                    "누적 ${plan.completedReps}회",
-                                style = MaterialTheme.typography.bodySmall,
+                                planProgress(plan),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.padding(top = 4.dp),
+                            )
+                            Text(
+                                "문장 ${plan.sentences.size}개 · 목표 ${plan.targetReps}회 · " +
+                                    "외운 문장 ${plan.memorizedCount}/${plan.sentences.size}",
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(top = 2.dp),
                             )
                         }
                     }
                 }
             }
         }
+    }
+}
+
+/** 이 영상을 어디까지 했는가. 열면 이 자리에서 이어서 한다. */
+private fun planProgress(plan: VideoPlan): String {
+    val at = plan.resumeAt
+    return when {
+        at != null -> "이어서 하기 · 문장 ${at.sentenceIndex + 1}/${plan.sentences.size} · ${at.repIndex + 1}회차"
+        plan.completedRounds > 1 -> "완료 ✓ (${plan.completedRounds}바퀴)"
+        plan.completedRounds == 1 -> "완료 ✓"
+        else -> "새 영상"
     }
 }

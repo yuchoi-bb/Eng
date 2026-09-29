@@ -55,3 +55,11 @@ internal fun plan(
     suggestedReps = targetReps,
     targetReps = targetReps,
 )
+
+/** 지금 걸음의 단계를 모두 끝낸다. 걸음마다 단계 수가 다르므로 테스트는 이것으로 한 걸음씩 민다. */
+internal fun com.myna.core.session.SessionEngine.completeStep(): com.myna.core.session.SessionEvent {
+    while (true) {
+        val event = completeStage()
+        if (event !is com.myna.core.session.SessionEvent.StageAdvanced) return event
+    }
+}

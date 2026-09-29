@@ -1,5 +1,6 @@
 package com.myna.core.session
 
+import com.myna.core.model.PlanPosition
 import com.myna.core.model.Sentence
 import com.myna.core.model.VideoPlan
 
@@ -8,11 +9,13 @@ public sealed interface SessionEvent {
     /** 같은 걸음 안에서 다음 단계로 넘어갔다. */
     public data class StageAdvanced(val stage: ShadowingStage) : SessionEvent
 
-    /** 3단계를 완주했다. §7.2 — 여기서만 카운트가 오른다. */
+    /** 한 걸음의 모든 단계를 완주했다. §7.2 — 여기서만 카운트가 오른다. */
     public data class CountCompleted(
         val sentenceIndex: Int,
         val totalCounts: Int,
         val achievedSecDelta: Int,
+        /** 다음에 이어서 할 자리. 마지막 걸음이었으면 null. */
+        val nextPosition: PlanPosition?,
     ) : SessionEvent
 
     /** 호흡 조각을 끝냈다. 카운트는 오르지 않는다. */
@@ -34,14 +37,40 @@ public class SessionEngine(
     private val dailyAlreadySec: Int = 0,
     /** 오늘의 목표. 0이면 달성 판정을 하지 않는다. */
     private val dailyTargetSec: Int = 0,
-    private val steps: List<SessionStep> = SessionPlan.expand(plan),
+    /** 외운 문장의 번호. 기본은 계획에 적힌 값이다. */
+    memorized: Set<Int> = plan.memorizedSentences,
+    /** 이어서 할 자리. null이거나 계획 밖이면 처음부터 한다. */
+    startAt: PlanPosition? = null,
+    /** 이 문장들만 연습한다. 오프라인 복습에서 들어 본 문장만 남길 때 쓴다. null이면 전부. */
+    sentenceFilter: Set<Int>? = null,
+    private val steps: List<SessionStep> = SessionPlan.expand(plan)
+        .filter { sentenceFilter == null || it.sentenceIndex in sentenceFilter },
 ) {
-    private var stepCursor: Int = 0
+    private val memorized: MutableSet<Int> = memorized.toMutableSet()
+
+    /** 원본을 들을 수 있는가. 세션 도중 재생이 막히면 꺼진다([dropSourceAudio]). */
+    private var sourceAudio: Boolean = options.sourceAudioAvailable
+
+    private var stepCursor: Int = firstStepAt(startAt)
     private var stageIndex: Int = 0
 
-    /** 1카운트를 구성하는 단계 수. 원본을 들을 수 없으면 듣기가 빠져 하나 줄어든다. */
-    public val stagesPerCount: Int = options.stages.size
+    /**
+     * 지금 걸음의 단계. **걸음을 시작할 때 정해 둔다** — 도중에 "외웠어요"를 눌러도 하던
+     * 걸음은 그대로 끝내고, 다음 회차부터 바뀐다.
+     */
+    private var currentStages: List<ShadowingStage> = stagesForCurrentStep()
 
+    init {
+        skipMemorizedBreathSteps()
+    }
+
+    /** 지금 걸음을 구성하는 단계 수. 회차와 외운 문장 여부에 따라 1~3개다. */
+    public val stagesPerCount: Int get() = currentStages.size
+
+    /** 지금 단계가 이번 걸음의 몇 번째인가 (1부터). */
+    public val stageNumber: Int get() = stageIndex + 1
+
+    /** 이 세션에서 올린 카운트. 오늘 로그에 더할 값이다. */
     public var completedCounts: Int = 0
         private set
 
@@ -61,7 +90,18 @@ public class SessionEngine(
 
     public val currentStep: SessionStep? get() = steps.getOrNull(stepCursor)
 
-    public val currentStage: ShadowingStage get() = options.stages[stageIndex]
+    public val currentStage: ShadowingStage
+        get() = currentStages.getOrElse(stageIndex) { currentStages.last() }
+
+    /** 다음에 이어서 할 자리. 모든 걸음을 끝냈으면 null. */
+    public val position: PlanPosition?
+        get() = currentStep?.let { PlanPosition(it.sentenceIndex, it.repIndex) }
+
+    /** 지금 문장을 외웠다고 표시했는가. */
+    public val isCurrentSentenceMemorized: Boolean
+        get() = currentStep?.sentenceIndex?.let { it in memorized } ?: false
+
+    public val memorizedSentences: Set<Int> get() = memorized
 
     public val currentSentence: Sentence?
         get() = currentStep?.let { plan.sentences.getOrNull(it.sentenceIndex) }
@@ -97,7 +137,14 @@ public class SessionEngine(
     public val remainingDailySec: Int
         get() = (dailyTargetSec - dailyAlreadySec - achievedSec).coerceAtLeast(0)
 
-    public val remainingCounts: Int get() = (targetCounts - completedCounts).coerceAtLeast(0)
+    /**
+     * 이 영상에서 지금까지 끝낸 카운트 — 이어서 하기로 건너뛴 앞부분까지 포함한다.
+     * 진행바는 이 세션이 아니라 영상 전체를 기준으로 보여 준다.
+     */
+    public val overallCompletedCounts: Int
+        get() = steps.subList(0, stepCursor.coerceAtMost(steps.size)).count { it.countsTowardTarget }
+
+    public val remainingCounts: Int get() = (targetCounts - overallCompletedCounts).coerceAtLeast(0)
 
     /** §7.2 — 자막을 보여줄지. 마지막 말하기 단계에서만 숨긴다. */
     public val showsSubtitle: Boolean get() = currentStage.showsSubtitle
@@ -105,8 +152,96 @@ public class SessionEngine(
     /** 무음 모드에서는 어느 단계에서도 마이크를 켜지 않는다. */
     public val requiresRecording: Boolean get() = options.requiresRecording(currentStage)
 
-    /** 이 단계에서 원본을 재생해야 하는가. 들을 수 없는 자리에서는 아무것도 재생하지 않는다. */
-    public val playsSource: Boolean get() = options.sourceAudioAvailable
+    /** 이 세션에서 원본을 재생할 수 있는가. 들을 수 없는 자리에서는 아무것도 재생하지 않는다. */
+    public val playsSource: Boolean get() = sourceAudio
+
+    /**
+     * 이 단계를 시작할 때 원본을 먼저 들려주는가.
+     *
+     * 외운 문장은 먼저 듣지 않는다 — 기억에서 꺼내 말하는 것이 이 단계의 목적이다.
+     */
+    public val playsBeforeStage: Boolean
+        get() = sourceAudio && currentStage != ShadowingStage.RECALL
+
+    /**
+     * 말한 **뒤에** 원본을 들려줄 차례인가. 외운 문장만 해당하고,
+     * [SessionOptions.RECALL_CHECK_INTERVAL] 회차마다 한 번이다.
+     */
+    public val checksAfterSpeaking: Boolean
+        get() {
+            val step = currentStep ?: return false
+            return sourceAudio &&
+                currentStage == ShadowingStage.RECALL &&
+                (step.repIndex + 1) % SessionOptions.RECALL_CHECK_INTERVAL == 0
+        }
+
+    /**
+     * 지금 문장을 외웠다고 표시한다. **하던 걸음은 그대로 끝내고** 다음 회차부터 바로 말하기만 한다.
+     */
+    public fun markMemorized(sentenceIndex: Int) {
+        memorized += sentenceIndex
+    }
+
+    /**
+     * 외운 문장 표시를 푼다. 지금 그 문장을 바로 말하기로 하고 있었다면 **이번 걸음을
+     * 처음부터** 듣고 따라 하는 방식으로 다시 한다 — 막혔으니 푼 것이다.
+     *
+     * @return 지금 걸음을 다시 시작했으면 true.
+     */
+    public fun unmarkMemorized(sentenceIndex: Int): Boolean {
+        memorized -= sentenceIndex
+        val restart = currentStep?.sentenceIndex == sentenceIndex &&
+            currentStage == ShadowingStage.RECALL
+        if (restart) restartStep()
+        return restart
+    }
+
+    /**
+     * 원본 재생이 막혔다. 이후 걸음은 듣기 단계 없이 구성하고, 지금 듣기 단계였다면
+     * 이번 걸음을 말하기부터 다시 한다.
+     */
+    public fun dropSourceAudio() {
+        if (!sourceAudio) return
+        sourceAudio = false
+        if (currentStage == ShadowingStage.LISTEN) restartStep()
+    }
+
+    private fun restartStep() {
+        stageIndex = 0
+        currentStages = stagesForCurrentStep()
+    }
+
+    private fun stagesForCurrentStep(): List<ShadowingStage> {
+        val step = currentStep ?: return options.stages
+        // 호흡 조각은 긴 문장을 입에 얹는 발판이다. 외운 문장 규칙을 적용하지 않는다.
+        val memorizedNow = step.countsTowardTarget && step.sentenceIndex in memorized
+        return options.stagesFor(step.repIndex, memorizedNow, sourceAudio)
+    }
+
+    /** 외운 문장의 호흡 조각은 건너뛴다. 이미 입에 붙은 문장이다. */
+    private fun skipMemorizedBreathSteps() {
+        var moved = false
+        while (true) {
+            val step = currentStep ?: break
+            if (step.countsTowardTarget || step.sentenceIndex !in memorized) break
+            stepCursor += 1
+            moved = true
+        }
+        if (moved) restartStep()
+    }
+
+    /**
+     * [position]이 가리키는 걸음. (문장, 회차) 순서로 그 자리이거나 그 뒤의 첫 걸음이다.
+     * 계획 밖(반복 횟수를 줄였거나 문장이 바뀐 경우)이면 처음부터 한다.
+     */
+    private fun firstStepAt(position: PlanPosition?): Int {
+        if (position == null) return 0
+        val index = steps.indexOfFirst { step ->
+            step.sentenceIndex > position.sentenceIndex ||
+                (step.sentenceIndex == position.sentenceIndex && step.repIndex >= position.repIndex)
+        }
+        return if (index < 0) 0 else index
+    }
 
     /**
      * 현재 단계를 끝낸다. 듣기 단계는 재생이 끝났을 때, 말하기 단계는 녹음이 끝났을 때 부른다.
@@ -114,14 +249,15 @@ public class SessionEngine(
     public fun completeStage(): SessionEvent {
         val step = currentStep ?: return SessionEvent.SessionFinished
 
-        if (stageIndex + 1 < options.stages.size) {
+        if (stageIndex + 1 < currentStages.size) {
             stageIndex += 1
             return SessionEvent.StageAdvanced(currentStage)
         }
 
         // 모든 단계 완주 — 한 걸음이 끝났다.
-        stageIndex = 0
         stepCursor += 1
+        restartStep()
+        skipMemorizedBreathSteps()
 
         if (!step.countsTowardTarget) {
             return SessionEvent.BreathGroupCompleted
@@ -135,6 +271,7 @@ public class SessionEngine(
             sentenceIndex = step.sentenceIndex,
             totalCounts = completedCounts,
             achievedSecDelta = delta,
+            nextPosition = position,
         )
     }
 }

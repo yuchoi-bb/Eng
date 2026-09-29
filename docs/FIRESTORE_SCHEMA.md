@@ -142,8 +142,13 @@ TRANSCRIPTION_SCHEMA §6의 권고를 따른다. 근거는 두 가지다.
   // --- 사용자 설정 / 진행 상태 ---
   "targetReps": 8,
   "autoReps": true,
-  "completedReps": 3,            // increment
+  "completedReps": 3,            // increment — 누적 카운트(문장 1개 = 1)
   "lastSessionAt": "<timestamp>",
+  "resumeAt": { "sentenceIndex": 4, "repIndex": 2 },  // 이어서 할 자리(0부터). null = 처음부터.
+                                 // 한 문장을 끝낼 때마다 갱신한다. 걸음 번호가 아니라 (문장, 회차)라
+                                 // 반복 횟수를 바꿔도 뜻이 통한다.
+  "completedRounds": 0,          // 목표 회차를 끝까지 마친 횟수. ≥1이면 "완료"
+  "memorizedSentences": [0, 2],  // "외웠어요" 한 문장 번호. 듣지 않고 바로 말한다(REQUIREMENTS §7.2.1)
 
   "transcribedAt": "<timestamp>",
   "createdAt": "<serverTimestamp>",

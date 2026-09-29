@@ -1,6 +1,8 @@
 package com.myna.ui.session
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,6 +26,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import com.myna.core.model.VideoPlan
+import com.myna.core.model.VideoSource
 import com.myna.core.offline.OfflineAvailability
 import com.myna.core.offline.OfflinePlanStatus
 import com.myna.core.session.RepsCalculator
@@ -44,26 +47,40 @@ internal fun SessionSetupScreen(
     online: Boolean,
     offlineStatus: OfflinePlanStatus,
     needsSourceAudio: Boolean,
-    onStart: (VideoPlan, SessionOptions) -> Unit,
+    /** 세 번째 값: 저장된 자리에서 이어서 하는가. */
+    onStart: (VideoPlan, SessionOptions, Boolean) -> Unit,
     onBack: () -> Unit,
 ) {
     var autoReps by remember { mutableStateOf(plan.autoReps) }
     var manualReps by remember { mutableStateOf(plan.targetReps.toString()) }
     var whisper by remember { mutableStateOf(false) }
 
+    // 현장 메모로 적은 문장은 원본 영상이 없다. 들려줄 것이 없는데 재생기를 기다리면
+    // 세션이 시작되지 않는다.
+    val isNote = plan.transcript.source == VideoSource.NOTE
     // 원본을 들을 수 있는 조건: 회선이 필요한 소스라면 회선이 살아 있어야 한다.
-    val sourceAudioAvailable = !needsSourceAudio || online
+    val sourceAudioAvailable = !isNote && (!needsSourceAudio || online)
+    // 회선이 없어 들어 본 문장만 도는 복습. 메모 연습은 원래 원본이 없으므로 해당하지 않는다.
+    val offlineReview = !sourceAudioAvailable && !isNote
 
     val speechSec = RepsCalculator.speechSec(plan.transcript)
     val effectiveReps = if (autoReps) plan.suggestedReps else manualReps.toIntOrNull() ?: plan.suggestedReps
     val projectedSec = effectiveReps * speechSec
 
-    Column(Modifier.fillMaxSize().padding(20.dp)) {
+    // 이어서 하기 버튼과 수동 횟수 입력이 겹치면 작은 화면에서 넘친다. 스크롤을 둔다.
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) {
         Text("세션 준비", style = MaterialTheme.typography.headlineSmall)
 
         Spacer(Modifier.height(16.dp))
         Text("문장 ${plan.sentences.size}개 · 발화 ${formatDuration(speechSec)}")
         Text("유형 ${plan.transcript.type}", style = MaterialTheme.typography.bodySmall)
+        if (plan.memorizedCount > 0) {
+            Text(
+                "외운 문장 ${plan.memorizedCount}/${plan.sentences.size} — 듣지 않고 바로 말합니다",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
 
         Spacer(Modifier.height(20.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -77,7 +94,7 @@ internal fun SessionSetupScreen(
             Switch(checked = whisper, onCheckedChange = { whisper = it })
         }
 
-        if (!sourceAudioAvailable) {
+        if (offlineReview) {
             Spacer(Modifier.height(12.dp))
             Text(
                 offlineNotice(offlineStatus),
@@ -124,28 +141,56 @@ internal fun SessionSetupScreen(
             )
         }
 
+        val reps = effectiveReps.coerceAtLeast(1)
+        // 이어서 할 자리. 반복 횟수를 줄여 그 자리가 없어졌으면 처음부터 한다.
+        // 오프라인 복습은 들어 본 문장만 돌므로 자리를 쓰지 않는다.
+        val resumeAt = plan.resumeAt?.takeIf {
+            !offlineReview && it.sentenceIndex < plan.sentences.size && it.repIndex < reps
+        }
+        val start = { resume: Boolean ->
+            onStart(
+                plan.copy(
+                    autoReps = autoReps,
+                    targetReps = reps,
+                    // 처음부터를 골랐으면 예전 자리를 지운다. 한 문장도 안 하고 나가도
+                    // 다음에 다시 예전 자리를 권하지 않게.
+                    resumeAt = if (resume) plan.resumeAt else null,
+                ),
+                SessionOptions(
+                    sourceAudioAvailable = sourceAudioAvailable,
+                    voiceMode = if (whisper) VoiceMode.WHISPER else VoiceMode.ALOUD,
+                ),
+                resume,
+            )
+        }
+
         Spacer(Modifier.height(24.dp))
-        Row(Modifier.fillMaxWidth()) {
-            TextButton(onClick = onBack, modifier = Modifier.weight(1f)) { Text("뒤로") }
-            Button(
-                onClick = {
-                    onStart(
-                        plan.copy(
-                            autoReps = autoReps,
-                            targetReps = effectiveReps.coerceAtLeast(1),
-                        ),
-                        SessionOptions(
-                            sourceAudioAvailable = sourceAudioAvailable,
-                            voiceMode = if (whisper) VoiceMode.WHISPER else VoiceMode.ALOUD,
-                        ),
+        if (resumeAt != null) {
+            Button(onClick = { start(true) }, modifier = Modifier.fillMaxWidth()) {
+                Text("이어서 하기 — 문장 ${resumeAt.sentenceIndex + 1}/${plan.sentences.size} · ${resumeAt.repIndex + 1}회차")
+            }
+            Row(Modifier.fillMaxWidth()) {
+                TextButton(onClick = onBack, modifier = Modifier.weight(1f)) { Text("뒤로") }
+                TextButton(onClick = { start(false) }, modifier = Modifier.weight(1f)) { Text("처음부터") }
+            }
+        } else {
+            Row(Modifier.fillMaxWidth()) {
+                TextButton(onClick = onBack, modifier = Modifier.weight(1f)) { Text("뒤로") }
+                Button(
+                    onClick = { start(false) },
+                    // 회선이 없고 들어 본 문장도 없으면 시작할 수 없다.
+                    enabled = !offlineReview ||
+                        offlineStatus.availability != OfflineAvailability.NOT_READY,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        when {
+                            offlineReview -> "오프라인으로 복습"
+                            plan.completedRounds > 0 -> "한 바퀴 더"
+                            else -> "시작"
+                        },
                     )
-                },
-                // 회선이 없고 들어 본 문장도 없으면 시작할 수 없다.
-                enabled = sourceAudioAvailable ||
-                    offlineStatus.availability != OfflineAvailability.NOT_READY,
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(if (sourceAudioAvailable) "시작" else "오프라인으로 복습")
+                }
             }
         }
     }

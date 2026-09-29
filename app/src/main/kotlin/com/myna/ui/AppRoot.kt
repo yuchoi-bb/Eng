@@ -40,7 +40,8 @@ internal sealed interface Screen {
     data object Home : Screen
     data class ManualEntry(val videoUri: Uri?, val youTubeVideoId: String? = null) : Screen
     data class SessionSetup(val planId: String) : Screen
-    data class Session(val planId: String, val options: SessionOptions) : Screen
+    /** @param resume 저장된 자리에서 이어서 한다. false면 처음부터. */
+    data class Session(val planId: String, val options: SessionOptions, val resume: Boolean) : Screen
     data object CaptureNote : Screen
     data object NoteList : Screen
     data class ResolveNote(val noteId: String) : Screen
@@ -138,9 +139,9 @@ internal fun AppRoot(
                     offlineStatus = OfflineReadiness.statusFor(plan, state.clearedSentenceIds),
                     // 유튜브는 임베드 재생이라 회선이 필요하다. 메모 연습은 원본 자체가 없다.
                     needsSourceAudio = plan.transcript.source == VideoSource.YOUTUBE,
-                    onStart = { adjusted, options ->
+                    onStart = { adjusted, options, resume ->
                         repository.putPlan(adjusted, repository.localMediaUri(adjusted.id.value))
-                        screen = Screen.Session(adjusted.id.value, options)
+                        screen = Screen.Session(adjusted.id.value, options, resume)
                     },
                     onBack = { screen = Screen.Home },
                 )
@@ -148,12 +149,16 @@ internal fun AppRoot(
         }
 
         is Screen.Session -> {
-            val stored = state.plans[current.planId]
-            // 오프라인이면 들어 본 적 있는 문장만 남긴 사본으로 돈다.
-            val plan = when {
-                stored == null -> null
-                current.options.sourceAudioAvailable -> stored
-                else -> OfflineReadiness.practicablePlan(stored, state.clearedSentenceIds)
+            val plan = state.plans[current.planId]
+            // 오프라인이면 들어 본 적 있는 문장만 돈다. 문장 번호는 원래대로 둔다 —
+            // 외운 문장 표시와 이어서 하기 자리가 그 번호를 쓴다.
+            // 메모 연습은 원래 원본이 없다. 회선이 없어서 원본을 못 듣는 경우만 오프라인 복습이다.
+            val offline = !current.options.sourceAudioAvailable &&
+                plan?.transcript?.source != VideoSource.NOTE
+            val sentenceFilter = if (plan != null && offline) {
+                OfflineReadiness.practicableSentenceIndexes(plan, state.clearedSentenceIds)
+            } else {
+                null
             }
             // 유튜브는 sourceRef가 곧 영상 ID다. 업로드는 이 기기에 원본이 있어야 한다(§10.1).
             val sessionSource = when {
@@ -164,13 +169,18 @@ internal fun AppRoot(
                 else -> repository.localMediaUri(current.planId)
                     ?.let { SessionSource.Upload(Uri.parse(it)) }
             }
-            val playable = plan != null &&
-                (!current.options.sourceAudioAvailable || sessionSource != null ||
-                    plan.transcript.source == VideoSource.NOTE)
+            val playable = plan != null && when {
+                offline -> sentenceFilter != null
+                plan.transcript.source == VideoSource.NOTE -> true
+                else -> sessionSource != null
+            }
 
             if (plan == null || !playable) {
                 LaunchedEffect(current.planId) { screen = Screen.Home }
             } else {
+                // 일부 문장만 도는 오프라인 복습은 자리를 적지 않는다 — 건너뛴 문장이
+                // 영영 건너뛰어진다.
+                val savesPosition = sentenceFilter == null
                 SessionScreen(
                     plan = plan,
                     source = sessionSource,
@@ -179,12 +189,23 @@ internal fun AppRoot(
                     showTransliteration = state.settings.showTransliterationKo,
                     dailyAlreadySec = repository.today(today).achievedSec,
                     dailyTargetSec = state.settings.dailyTargetSec,
+                    startAt = plan.resumeAt.takeIf { current.resume && savesPosition },
+                    sentenceFilter = sentenceFilter,
                     onKeepScreenOn = onKeepScreenOn,
-                    onSentenceCleared = { index ->
-                        repository.markSentenceCleared(current.planId, index)
+                    onCountCompleted = { event ->
+                        repository.recordCount(
+                            date = today,
+                            planId = current.planId,
+                            sentenceIndex = event.sentenceIndex,
+                            achievedSec = event.achievedSecDelta,
+                            nextPosition = event.nextPosition,
+                            savesPosition = savesPosition,
+                        )
                     },
-                    onFinished = { achievedSec, counts ->
-                        repository.addProgress(today, current.planId, achievedSec, counts)
+                    onMemorizedChanged = { index, memorized ->
+                        repository.setMemorized(current.planId, index, memorized)
+                    },
+                    onExit = {
                         repository.applyBudgetAdaptation(today)
                         screen = Screen.Home
                     },

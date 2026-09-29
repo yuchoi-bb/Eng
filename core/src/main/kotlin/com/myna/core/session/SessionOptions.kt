@@ -29,16 +29,36 @@ public data class SessionOptions(
     val voiceMode: VoiceMode = VoiceMode.ALOUD,
 ) {
     /**
-     * 1카운트를 구성하는 단계 순서. REQUIREMENTS §7.2.
+     * 처음 듣는 회차의 단계 순서. REQUIREMENTS §7.2.
      *
      * 원본을 들을 수 없으면 **듣기 단계를 뺀다.** 들려줄 것이 없는데 "듣기"를 세워 두면
      * 사용자는 빈 화면을 넘기게 되고, 카운트의 의미가 흐려진다. 남은 두 단계
      * (보고 말하기 → 자막 끄고 말하기)는 이미 한 번 들어 본 문장의 복습으로 성립한다.
      */
-    public val stages: List<ShadowingStage> = buildList {
-        if (sourceAudioAvailable) add(ShadowingStage.LISTEN)
-        add(ShadowingStage.SHADOW_WITH_TEXT)
-        add(ShadowingStage.SHADOW_NO_TEXT)
+    public val stages: List<ShadowingStage> = stagesFor(repIndex = 0, memorized = false)
+
+    /**
+     * 한 걸음(문장 1개의 한 회차)을 구성하는 단계. 1카운트 = 이 단계를 모두 끝내는 것.
+     *
+     * - **외운 문장**: 자막 없이 바로 말하기 하나. 듣는 시간을 빼고 말하는 횟수를 늘린다.
+     * - **처음 듣는 회차**(repIndex 0): 듣기 → 보고 말하기 → 자막 끄고 말하기.
+     * - **그다음 회차**: 듣기만 하는 단계를 뺀다. 2·3단계도 말하기 직전에 원본을 들려주므로
+     *   따로 "듣기만"을 두면 같은 소리를 한 회차에 세 번 듣게 된다.
+     *
+     * @param sourceAudioAvailable 세션 도중 원본 재생이 막히면 false로 다시 묻는다.
+     */
+    public fun stagesFor(
+        repIndex: Int,
+        memorized: Boolean,
+        sourceAudioAvailable: Boolean = this.sourceAudioAvailable,
+    ): List<ShadowingStage> = when {
+        memorized -> listOf(ShadowingStage.RECALL)
+        repIndex == 0 && sourceAudioAvailable -> listOf(
+            ShadowingStage.LISTEN,
+            ShadowingStage.SHADOW_WITH_TEXT,
+            ShadowingStage.SHADOW_NO_TEXT,
+        )
+        else -> listOf(ShadowingStage.SHADOW_WITH_TEXT, ShadowingStage.SHADOW_NO_TEXT)
     }
 
     /** 녹음과 채점을 할 것인가. */
@@ -47,4 +67,14 @@ public data class SessionOptions(
     /** 이 단계에서 마이크를 켜야 하는가. */
     public fun requiresRecording(stage: ShadowingStage): Boolean =
         stage.isSpeaking && recordsVoice
+
+    public companion object {
+        /**
+         * 외운 문장은 이 회차마다 한 번, 말한 **뒤에** 원본을 들려준다.
+         *
+         * 왕초보가 원본을 전혀 듣지 않고 반복하면 틀린 발음이 굳는다. 먼저 말하고 나중에
+         * 들으면 기억에서 꺼내는 연습은 살리면서 어긋난 곳을 스스로 알아챌 수 있다.
+         */
+        public const val RECALL_CHECK_INTERVAL: Int = 3
+    }
 }

@@ -1,5 +1,6 @@
 package com.myna.core.session
 
+import com.myna.core.completeStep
 import com.myna.core.plan
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -60,7 +61,7 @@ class SessionOptionsTest {
     fun `무음 모드에서도 발화 시간은 쌓인다`() {
         // 조음 근육은 실제로 움직인다. 소리를 안 냈다고 연습이 아닌 것은 아니다.
         val engine = SessionEngine(plan(targetReps = 1), SessionOptions(voiceMode = VoiceMode.WHISPER))
-        repeat(engine.stagesPerCount) { engine.completeStage() }
+        engine.completeStep()
         assertEquals(1, engine.completedCounts)
         assertTrue(engine.achievedSec > 0)
         assertFalse(engine.requiresRecording)

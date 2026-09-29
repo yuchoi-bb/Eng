@@ -1,5 +1,6 @@
 package com.myna.core.session
 
+import com.myna.core.completeStep
 import com.myna.core.plan
 import com.myna.core.sentence
 import com.myna.core.transcript
@@ -39,7 +40,7 @@ class SessionGoalTest {
     fun `회차와 문장 번호가 진행에 따라 오른다`() {
         val engine = SessionEngine(plan(manySentences, targetReps = 18))
         // 한 문장을 완주하면 같은 문장의 다음 회차로 간다 (SessionPlan은 문장별로 펼친다)
-        repeat(engine.stagesPerCount) { engine.completeStage() }
+        engine.completeStep()
         assertEquals(2, engine.currentRep)
         assertEquals(1, engine.currentSentenceNumber)
     }
@@ -55,7 +56,7 @@ class SessionGoalTest {
         assertFalse(engine.dailyGoalMet)
         assertEquals(3, engine.remainingDailySec)
 
-        repeat(engine.stagesPerCount * 3) { engine.completeStage() }
+        repeat(3) { engine.completeStep() }
         assertTrue(engine.dailyGoalMet)
         assertEquals(0, engine.remainingDailySec)
     }
@@ -71,7 +72,7 @@ class SessionGoalTest {
         assertTrue(engine.dailyGoalMet)
         assertFalse(engine.isFinished)
 
-        repeat(engine.stagesPerCount) { engine.completeStage() }
+        engine.completeStep()
         assertEquals(1, engine.completedCounts)
     }
 

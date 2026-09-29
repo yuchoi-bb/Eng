@@ -6,6 +6,7 @@ import com.myna.core.plan
 import java.time.LocalDate
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** S0 저장 형식. S1에서 Firestore로 갈아탈 때 이 구조가 그대로 문서가 된다. */
@@ -56,5 +57,36 @@ class AppStateTest {
         val state = sample()
         val planJson = AppState.json.encodeToString(AppState.serializer(), state.copy(localMediaUris = emptyMap()))
         assertTrue(!planJson.contains("content://"), "VideoPlan이 로컬 URI를 들고 있다")
+    }
+
+    @Test
+    fun `이어서 하기 자리와 외운 문장이 저장된다`() {
+        val videoPlan = plan(targetReps = 8).copy(
+            resumeAt = com.myna.core.model.PlanPosition(sentenceIndex = 3, repIndex = 5),
+            completedRounds = 1,
+            memorizedSentences = setOf(0, 2),
+        )
+        val original = AppState(plans = mapOf(videoPlan.id.value to videoPlan))
+        val restored = AppState.json.decodeFromString(
+            AppState.serializer(),
+            AppState.json.encodeToString(AppState.serializer(), original),
+        )
+        assertEquals(original, restored)
+    }
+
+    @Test
+    fun `이전 버전 파일의 계획은 처음부터로 읽힌다`() {
+        // v0.5 이하가 적은 파일에는 resumeAt·memorizedSentences가 없다.
+        val encoded = AppState.json.encodeToString(AppState.serializer(), sample())
+            .lines()
+            .filterNot { "\"resumeAt\"" in it || "\"memorizedSentences\"" in it || "\"completedRounds\"" in it }
+            .joinToString("\n")
+            // 마지막 필드를 지우면 앞 줄에 쉼표가 남는다.
+            .replace(Regex(",(\\s*})"), "$1")
+        assertTrue("resumeAt" !in encoded && "memorizedSentences" !in encoded, encoded)
+        val restored = AppState.json.decodeFromString(AppState.serializer(), encoded)
+        val videoPlan = restored.plans.values.single()
+        assertNull(videoPlan.resumeAt)
+        assertEquals(emptySet(), videoPlan.memorizedSentences)
     }
 }

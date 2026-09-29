@@ -3,6 +3,7 @@ package com.myna.data
 import com.myna.core.daily.DailyProgress
 import com.myna.core.daily.DailySpeechLog
 import com.myna.core.model.UserSettings
+import com.myna.core.model.PlanPosition
 import com.myna.core.model.SentenceId
 import com.myna.core.model.VideoPlan
 import com.myna.core.notes.FieldNote
@@ -101,49 +102,68 @@ public class ShadowingRepository(private val store: LocalStore) {
         mutate { it.copy(fieldNotes = it.fieldNotes.filterNot { note -> note.id == noteId }) }
     }
 
-    // ---------- 오프라인 판정 ----------
-
-    /**
-     * 한 번 이상 완주한 문장으로 기록한다. 오프라인에서 무엇을 연습할 수 있는지가 여기서 나온다.
-     */
-    public fun markSentenceCleared(planId: String, sentenceIndex: Int) {
-        val id = SentenceId.of(
-            _state.value.plans[planId]?.id ?: return,
-            sentenceIndex,
-        ).value
-        if (id in _state.value.clearedSentenceIds) return
-        mutate { it.copy(clearedSentenceIds = it.clearedSentenceIds + id) }
-    }
-
     public fun today(date: LocalDate): DailySpeechLog =
         DailyProgress.logFor(_state.value.dailyLogs, date, _state.value.settings.dailyTargetSec)
 
     public fun streak(today: LocalDate): Int = DailyProgress.currentStreak(_state.value.dailyLogs, today)
 
     /**
-     * 세션에서 쌓은 발화 시간과 카운트를 오늘 로그에 더한다.
+     * 한 문장을 끝낼 때마다 부른다 — 발화 시간·카운트·이어서 할 자리를 **그 자리에서** 적는다.
      *
-     * FIRESTORE_SCHEMA §2가 요구하는 **누적 합산**이다. S0는 단일 기기라 덧셈으로 충분하지만,
-     * S1에서 이 자리가 `FieldValue.increment()`가 된다. 값을 통째로 덮어쓰는 형태로 짜 두면
-     * 그때 태블릿 간 발화 시간이 사라진다.
+     * 세션이 끝날 때 한꺼번에 적으면 전화가 오거나 앱이 꺼졌을 때 그 세션의 진행이
+     * 통째로 사라진다.
+     *
+     * 오늘 로그는 FIRESTORE_SCHEMA §2가 요구하는 **누적 합산**이다. S0는 단일 기기라 덧셈으로
+     * 충분하지만, S1에서 이 자리가 `FieldValue.increment()`가 된다.
+     *
+     * @param nextPosition 다음에 이어서 할 자리. null이면 목표 회차를 다 끝낸 것이다.
+     * @param savesPosition 오프라인 복습처럼 일부 문장만 도는 세션은 자리를 적지 않는다 —
+     *   건너뛴 문장이 영영 건너뛰어진다.
      */
-    public fun addProgress(date: LocalDate, planId: String, achievedSec: Int, counts: Int) {
+    public fun recordCount(
+        date: LocalDate,
+        planId: String,
+        sentenceIndex: Int,
+        achievedSec: Int,
+        nextPosition: PlanPosition?,
+        savesPosition: Boolean,
+    ) {
         mutate { current ->
             val existing = DailyProgress.logFor(current.dailyLogs, date, current.settings.dailyTargetSec)
             val updated = existing.copy(
                 achievedSec = existing.achievedSec + achievedSec,
-                countedUtterances = existing.countedUtterances + counts,
+                countedUtterances = existing.countedUtterances + 1,
                 videoIds = existing.videoIds + planId,
             )
-            val plan = current.plans[planId]
+            val plan = current.plans[planId] ?: return@mutate current.copy(
+                dailyLogs = current.dailyLogs + (date to updated),
+            )
+            val progressed = plan.copy(completedReps = plan.completedReps + 1).let {
+                when {
+                    !savesPosition -> it
+                    nextPosition == null -> it.copy(resumeAt = null, completedRounds = it.completedRounds + 1)
+                    else -> it.copy(resumeAt = nextPosition)
+                }
+            }
             current.copy(
                 dailyLogs = current.dailyLogs + (date to updated),
-                plans = if (plan == null) {
-                    current.plans
-                } else {
-                    current.plans + (planId to plan.copy(completedReps = plan.completedReps + counts))
-                },
+                plans = current.plans + (planId to progressed),
+                // 한 번 이상 완주한 문장 — 오프라인에서 무엇을 복습할 수 있는지가 여기서 나온다.
+                clearedSentenceIds = current.clearedSentenceIds + SentenceId.of(plan.id, sentenceIndex).value,
             )
+        }
+    }
+
+    /** "외웠어요" / "헷갈려요". 외운 문장은 다음 회차부터 듣지 않고 바로 말한다. */
+    public fun setMemorized(planId: String, sentenceIndex: Int, memorized: Boolean) {
+        mutate { current ->
+            val plan = current.plans[planId] ?: return@mutate current
+            val sentences = if (memorized) {
+                plan.memorizedSentences + sentenceIndex
+            } else {
+                plan.memorizedSentences - sentenceIndex
+            }
+            current.copy(plans = current.plans + (planId to plan.copy(memorizedSentences = sentences)))
         }
     }
 
