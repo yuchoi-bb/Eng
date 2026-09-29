@@ -192,6 +192,8 @@ internal fun SessionScreen(
                                         // 임베드가 거부되면 재생 완료 콜백이 오지 않는다.
                                         // 그대로 두면 세션이 듣기 단계에서 굳는다.
                                         onPlaybackRefused = controller::onSourceRefused,
+                                        // 오류 없이 썸네일에서 멈춘 경우. 알리지 않으면 "재생 중…"에서 굳는다.
+                                        onStalled = controller::onSourceStalled,
                                     ),
                                 )
                             }
@@ -231,6 +233,14 @@ internal fun SessionScreen(
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },
                 modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+        ui.stallNotice?.let { notice ->
+            Text(
+                notice,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(top = 6.dp),
             )
         }
         ui.playbackNotice?.let { notice ->

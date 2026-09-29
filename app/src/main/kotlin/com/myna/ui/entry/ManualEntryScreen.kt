@@ -204,7 +204,9 @@ internal fun ManualEntryScreen(
         // 미리듣기 재생기는 목록 위에 고정한다. 목록 안에 두면 스크롤로 사라진다.
         if (hasSource) {
             Box(
-                Modifier.fillMaxWidth().height(150.dp).padding(top = 8.dp),
+                // 유튜브는 200×200px보다 작은 임베드 플레이어의 재생을 거부할 수 있다. 세로 9:16이라
+                // 폭이 좁아지므로 높이를 넉넉히 둔다.
+                Modifier.fillMaxWidth().height(200.dp).padding(top = 8.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 SegmentPreviewPlayer(
@@ -213,7 +215,7 @@ internal fun ManualEntryScreen(
                     onPlayback = { playback = it },
                     onRefused = { reason ->
                         playingKey = null
-                        error = "$reason 미리듣기를 할 수 없습니다."
+                        error = "$reason 미리듣기를 다시 눌러 보세요."
                     },
                     modifier = Modifier
                         .fillMaxHeight()

@@ -1,5 +1,7 @@
 package com.myna.media
 
+import android.os.Handler
+import android.os.Looper
 import com.myna.core.playback.PlaybackSegment
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.PlayerConstants
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.YouTubePlayer
@@ -26,6 +28,13 @@ internal class YouTubeSourcePlayback(
      * 세션이 듣기 단계에서 굳는다.
      */
     private val onPlaybackRefused: (String) -> Unit = {},
+    /**
+     * 재생을 요청했는데 시작되지 않았다. 오류 없이 썸네일만 떠 있는 상태다.
+     *
+     * 이걸 알리지 않으면 재생 완료 콜백이 영영 오지 않아 화면은 "재생 중…"인 채로 멈춘다.
+     * 거부와 달리 원본을 포기하지는 않는다 — 다시 누르면 나올 수 있다.
+     */
+    private val onStalled: (String) -> Unit = {},
 ) : SourcePlayback {
 
     private var player: YouTubePlayer? = null
@@ -33,16 +42,36 @@ internal class YouTubeSourcePlayback(
     private var onSegmentFinished: (() -> Unit)? = null
     private var pendingPlay: ((YouTubePlayer) -> Unit)? = null
 
+    /** 플레이어가 마지막으로 알린 상태. 재생이 실제로 시작됐는지 여기서 본다. */
+    private var state: PlayerConstants.PlayerState = PlayerConstants.PlayerState.UNKNOWN
+
+    private val handler = Handler(Looper.getMainLooper())
+
+    /** 재생 요청마다 오른다. 지난 요청의 감시가 새 요청을 건드리지 않게 한다. */
+    private var request = 0
+
     init {
         view.enableAutomaticInitialization = false
         view.initialize(
             object : AbstractYouTubePlayerListener() {
                 override fun onReady(youTubePlayer: YouTubePlayer) {
                     player = youTubePlayer
-                    youTubePlayer.cueVideo(videoId, 0f)
-                    // 준비 전에 들어온 재생 요청을 흘리지 않는다.
-                    pendingPlay?.let { it(youTubePlayer) }
+                    val pending = pendingPlay
                     pendingPlay = null
+                    if (pending != null) {
+                        // 준비 전에 들어온 재생 요청이 있으면 곧장 재생한다. 썸네일을 먼저 띄우는
+                        // cueVideo를 바로 앞에 보내면 두 명령이 겹쳐 썸네일에서 멈출 수 있다.
+                        pending(youTubePlayer)
+                    } else {
+                        youTubePlayer.cueVideo(videoId, 0f)
+                    }
+                }
+
+                override fun onStateChange(
+                    youTubePlayer: YouTubePlayer,
+                    state: PlayerConstants.PlayerState,
+                ) {
+                    this@YouTubeSourcePlayback.state = state
                 }
 
                 override fun onError(
@@ -51,6 +80,7 @@ internal class YouTubeSourcePlayback(
                 ) {
                     endSeconds = NO_TARGET
                     pendingPlay = null
+                    request += 1
                     onPlaybackRefused(describe(error))
                 }
 
@@ -77,24 +107,73 @@ internal class YouTubeSourcePlayback(
         endSeconds = segment.endMs / 1000f
 
         val start = segment.startMs / 1000f
+        val token = ++request
         val action: (YouTubePlayer) -> Unit = { youTubePlayer ->
             youTubePlayer.setPlaybackRate(playbackRateFor(speed))
             youTubePlayer.loadVideo(videoId, start)
+            watch(token, start)
         }
 
         val ready = player
         if (ready == null) pendingPlay = action else action(ready)
     }
 
+    /**
+     * 재생이 실제로 시작됐는지 지켜본다.
+     *
+     * `loadVideo`는 결과를 돌려주지 않는다. 영상이 썸네일에 머문 채 오류도 없이 멈추면
+     * 재생 완료 콜백이 영영 오지 않는다. 그래서 몇 초 뒤 상태를 보고, 안 움직이면 한 번 더
+     * 밀어 보고, 그래도 안 되면 [onStalled]로 알린다.
+     */
+    private fun watch(token: Int, start: Float) {
+        fun stillWaiting() = token == request && endSeconds > NO_TARGET &&
+            state != PlayerConstants.PlayerState.PLAYING
+
+        handler.postDelayed({
+            if (stillWaiting() && state != PlayerConstants.PlayerState.BUFFERING) player?.play()
+        }, NUDGE_AFTER_MS)
+        handler.postDelayed({
+            if (stillWaiting() && state != PlayerConstants.PlayerState.BUFFERING) {
+                player?.seekTo(start)
+                player?.play()
+            }
+        }, RETRY_AFTER_MS)
+        handler.postDelayed({
+            // 느린 회선에서 버퍼링 중이면 조금 더 기다린다.
+            if (stillWaiting() && state != PlayerConstants.PlayerState.BUFFERING) giveUp(token)
+        }, GIVE_UP_AFTER_MS)
+        handler.postDelayed({
+            if (stillWaiting()) giveUp(token)
+        }, GIVE_UP_BUFFERING_AFTER_MS)
+    }
+
+    private fun giveUp(token: Int) {
+        if (token != request) return
+        endSeconds = NO_TARGET
+        request += 1
+        onStalled("영상이 시작되지 않았습니다 (${stateName(state)}).")
+    }
+
     override fun pause() {
         endSeconds = NO_TARGET
+        request += 1
         player?.pause()
     }
 
     override fun release() {
+        request += 1
+        handler.removeCallbacksAndMessages(null)
         onSegmentFinished = null
         pendingPlay = null
         player = null
+    }
+
+    private fun stateName(state: PlayerConstants.PlayerState): String = when (state) {
+        PlayerConstants.PlayerState.VIDEO_CUED -> "대기 화면에서 멈춤"
+        PlayerConstants.PlayerState.UNSTARTED -> "시작 전"
+        PlayerConstants.PlayerState.BUFFERING -> "불러오는 중"
+        PlayerConstants.PlayerState.PAUSED -> "멈춤"
+        else -> state.name
     }
 
     /**
@@ -135,5 +214,9 @@ internal class YouTubeSourcePlayback(
 
     private companion object {
         const val NO_TARGET = -1f
+        const val NUDGE_AFTER_MS = 2_500L
+        const val RETRY_AFTER_MS = 5_000L
+        const val GIVE_UP_AFTER_MS = 9_000L
+        const val GIVE_UP_BUFFERING_AFTER_MS = 20_000L
     }
 }

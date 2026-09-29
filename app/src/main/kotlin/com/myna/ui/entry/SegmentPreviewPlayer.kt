@@ -53,6 +53,7 @@ internal fun SegmentPreviewPlayer(
                                 view = view,
                                 videoId = youTubeVideoId,
                                 onPlaybackRefused = { reason -> latestOnRefused(reason) },
+                                onStalled = { reason -> latestOnRefused(reason) },
                             ),
                         )
                     }

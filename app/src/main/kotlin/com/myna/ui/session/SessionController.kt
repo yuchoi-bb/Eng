@@ -42,6 +42,8 @@ internal data class SessionUiState(
     /** 원본 재생이 거부됐을 때 보여 줄 안내. */
     val playbackNotice: String? = null,
     val playsSource: Boolean = true,
+    /** 재생을 요청했는데 시작되지 않았을 때의 안내. */
+    val stallNotice: String? = null,
     /** 이번 걸음의 몇 번째 단계인가, 모두 몇 단계인가. 회차와 외운 문장 여부에 따라 1~3이다. */
     val stageNumber: Int = 1,
     val stageCount: Int = 3,
@@ -122,17 +124,46 @@ internal class SessionController(
     /** snapshot()이 자기 자신을 읽지 않도록 녹음 여부는 따로 들고 있는다. */
     private var isRecording = false
 
+    /** 화면이 시작을 요청했는가. 재생기가 아직 붙지 않았으면 붙는 순간 시작한다. */
+    private var startRequested = false
+
     fun attachSource(playback: SourcePlayback) {
         source = playback
+        when {
+            // 재생기보다 시작 요청이 먼저 왔다. 여기서 다시 부르지 않으면 영영 시작하지 않는다.
+            startRequested && !started -> start()
+            // 뷰가 새로 만들어져 재생기가 바뀌었다. 옛 재생기에 걸어 둔 재생 요청은 사라졌으므로
+            // 지금 단계를 새 재생기로 다시 시작한다. 말하던 중이면 건드리지 않는다.
+            started && playsSource && !isRecording -> beginStage()
+        }
     }
 
     fun start() {
+        startRequested = true
         // 원본이 없는 세션(오프라인 복습, 현장 메모 연습)은 재생기를 기다리지 않는다.
         if (started) return
         if (playsSource && source == null) return
         started = true
         beginStage()
     }
+
+    /**
+     * 재생을 요청했는데 시작되지 않았다(썸네일에서 멈춤). 세션을 멈춰 두지 않고 말하기로
+     * 넘어간다. 원본은 포기하지 않는다 — [다시 듣기]로 다시 시도할 수 있다.
+     */
+    fun onSourceStalled(reason: String) {
+        val step = engine.currentStep ?: return
+        stallNotice = "$reason [다시 듣기]를 눌러 보세요."
+        if (isChecking) {
+            isChecking = false
+            advance()
+        } else {
+            afterPlayback(step.sentenceIndex)
+        }
+    }
+
+    /** 재생이 멈췄을 때의 안내. 다음 재생을 시작하면 지운다. */
+    private var stallNotice: String? = null
 
     /**
      * 원본 재생이 거부됐다. 세션을 멈추지 않고 자막만 보는 방식으로 이어 간다.
@@ -168,6 +199,7 @@ internal class SessionController(
 
         isRecording = false
         isChecking = false
+        if (engine.playsBeforeStage) stallNotice = null
         _uiState.value = snapshot()
 
         if (!engine.playsBeforeStage) {
@@ -295,6 +327,7 @@ internal class SessionController(
         val sentence = plan.sentences[step.sentenceIndex]
         isRecording = false
         isChecking = false
+        stallNotice = null
         _uiState.value = snapshot()
         source?.playSegment(segmentFor(step.unit, sentence), playbackRate) {
             afterPlayback(step.sentenceIndex)
@@ -378,6 +411,7 @@ internal class SessionController(
             remainingDailySec = engine.remainingDailySec,
             playbackNotice = playbackNotice,
             playsSource = playsSource,
+            stallNotice = stallNotice,
             stageNumber = engine.stageNumber,
             stageCount = engine.stagesPerCount,
             memorized = engine.isCurrentSentenceMemorized,
