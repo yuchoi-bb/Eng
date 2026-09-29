@@ -5,13 +5,19 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import com.myna.core.source.YouTubeUrl
 import com.myna.ui.AppRoot
 
@@ -21,26 +27,38 @@ public class MainActivity : ComponentActivity() {
     private var sharedYouTubeVideoId by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // targetSdk 35부터 안드로이드 15는 앱을 상태 바·내비게이션 바 밑까지 그리게 강제한다.
+        // 모든 버전에서 같은 방식으로 그리게 하고, 가려지는 만큼은 아래에서 안쪽으로 비킨다.
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         handleShare(intent)
+
+        // 실행할 때마다 지금 버전을 알려 준다. 회전 같은 재생성에는 띄우지 않는다.
+        if (savedInstanceState == null) {
+            Toast.makeText(this, "myna v${BuildConfig.VERSION_NAME}", Toast.LENGTH_SHORT).show()
+        }
 
         val app = application as MynaApplication
         val repository = app.repository
 
         setContent {
             MaterialTheme {
-                Surface {
-                    AppRoot(
-                        repository = repository,
-                        apiKeys = app.apiKeys,
-                        sharedVideoUri = sharedVideoUri,
-                        sharedYouTubeVideoId = sharedYouTubeVideoId,
-                        onSharedVideoConsumed = {
-                            sharedVideoUri = null
-                            sharedYouTubeVideoId = null
-                        },
-                        onKeepScreenOn = ::keepScreenOn,
-                    )
+                // 배경은 바 밑까지 칠하고, 내용은 시스템 바·키보드를 비켜서 놓는다 —
+                // 화면 아래 버튼이 안드로이드 내비게이션 버튼과 겹치지 않게.
+                Surface(Modifier.fillMaxSize()) {
+                    Box(Modifier.safeDrawingPadding()) {
+                        AppRoot(
+                            repository = repository,
+                            apiKeys = app.apiKeys,
+                            sharedVideoUri = sharedVideoUri,
+                            sharedYouTubeVideoId = sharedYouTubeVideoId,
+                            onSharedVideoConsumed = {
+                                sharedVideoUri = null
+                                sharedYouTubeVideoId = null
+                            },
+                            onKeepScreenOn = ::keepScreenOn,
+                        )
+                    }
                 }
             }
         }

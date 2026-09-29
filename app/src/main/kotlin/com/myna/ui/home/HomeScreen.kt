@@ -2,6 +2,7 @@ package com.myna.ui.home
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,8 +16,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.myna.BuildConfig
 import com.myna.core.daily.DailySpeechLog
 import com.myna.core.store.AppState
 import com.myna.ui.ProgressBar
@@ -38,7 +41,16 @@ internal fun HomeScreen(
     onOpenSettings: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize().padding(20.dp)) {
-        Text("오늘", style = MaterialTheme.typography.headlineSmall)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+            Text("오늘", style = MaterialTheme.typography.headlineSmall)
+            Spacer(Modifier.weight(1f))
+            // 지금 쓰는 버전 — 새 버전을 받았는지 여기서 바로 확인한다.
+            Text(
+                "myna v${BuildConfig.VERSION_NAME}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
 
         // §4.2.1 — 예산은 상한이 아니라 목표값이다. 초과해도 막지 않고 120%처럼 보여 준다.
         val percent = (today.completionRate * 100).roundToInt()

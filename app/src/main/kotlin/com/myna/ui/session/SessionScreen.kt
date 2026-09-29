@@ -2,18 +2,24 @@ package com.myna.ui.session
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.view.ViewGroup
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -111,53 +117,67 @@ internal fun SessionScreen(
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         // 두 소스가 서로 다른 재생기를 쓴다. 뷰가 만들어진 뒤에야 재생기를 붙일 수 있으므로
         // factory 안에서 컨트롤러에 연결한다 — §F-1은 유튜브를 공식 임베드로만 재생하게 한다.
-        val playerModifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+        //
+        // 플레이어는 자막·버튼을 다 놓고 **남는 세로 공간**을 쓴다. 고정 비율로 잡으면 세로
+        // 영상(숏츠)이 화면 아래의 버튼을 밀어낸다.
         // when의 대상이 표현식이면 각 분기에서 스마트 캐스트가 되지 않는다. 지역 val로 받는다.
         val activeSource = source.takeIf { options.sourceAudioAvailable && ui.playsSource }
-        when (activeSource) {
-            // 원본이 없는 세션(오프라인 복습, 현장 메모 연습)은 재생할 것이 없다.
-            null -> Text(
-                if (options.sourceAudioAvailable) "" else "원본 없이 복습합니다",
-                style = MaterialTheme.typography.bodyMedium,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
-            )
-
-            is SessionSource.Upload -> {
-                // 람다 안으로 스마트 캐스트를 끌고 들어가지 않는다. 값을 먼저 꺼내 둔다.
-                val mediaUri = activeSource.uri
-                AndroidView(
-                    factory = { viewContext ->
-                        val playback = SegmentPlayer(viewContext).apply { this.mediaUri = mediaUri }
-                        controller.attachSource(playback)
-                        PlayerView(viewContext).apply {
-                            useController = false
-                            player = playback.player
-                        }
-                    },
-                    modifier = playerModifier,
+        Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+            when (activeSource) {
+                // 원본이 없는 세션(오프라인 복습, 현장 메모 연습)은 재생할 것이 없다.
+                null -> Text(
+                    if (options.sourceAudioAvailable) "" else "원본 없이 복습합니다",
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
                 )
-            }
 
-            is SessionSource.YouTube -> {
-                val videoId = activeSource.videoId
-                AndroidView(
-                    factory = { viewContext ->
-                        YouTubePlayerView(viewContext).also { view ->
-                            controller.attachSource(
-                                YouTubeSourcePlayback(
-                                    view = view,
-                                    videoId = videoId,
-                                    // 임베드가 거부되면 재생 완료 콜백이 오지 않는다.
-                                    // 그대로 두면 세션이 듣기 단계에서 굳는다.
-                                    onPlaybackRefused = controller::onSourceRefused,
-                                ),
-                            )
-                        }
-                    },
-                    onRelease = { view -> view.release() },
-                    modifier = playerModifier,
-                )
+                is SessionSource.Upload -> {
+                    // 람다 안으로 스마트 캐스트를 끌고 들어가지 않는다. 값을 먼저 꺼내 둔다.
+                    val mediaUri = activeSource.uri
+                    AndroidView(
+                        factory = { viewContext ->
+                            val playback = SegmentPlayer(viewContext).apply { this.mediaUri = mediaUri }
+                            controller.attachSource(playback)
+                            // PlayerView는 영상 고유 비율로 맞춰 그린다(RESIZE_MODE_FIT) — 가로든 세로든.
+                            PlayerView(viewContext).apply {
+                                useController = false
+                                player = playback.player
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+
+                is SessionSource.YouTube -> {
+                    val videoId = activeSource.videoId
+                    AndroidView(
+                        factory = { viewContext ->
+                            YouTubePlayerView(viewContext).also { view ->
+                                // YouTubePlayerView는 높이가 WRAP_CONTENT면 스스로 16:9로 줄인다.
+                                // 세로 틀을 그대로 쓰게 MATCH_PARENT로 못 박는다.
+                                view.layoutParams = ViewGroup.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                )
+                                controller.attachSource(
+                                    YouTubeSourcePlayback(
+                                        view = view,
+                                        videoId = videoId,
+                                        // 임베드가 거부되면 재생 완료 콜백이 오지 않는다.
+                                        // 그대로 두면 세션이 듣기 단계에서 굳는다.
+                                        onPlaybackRefused = controller::onSourceRefused,
+                                    ),
+                                )
+                            }
+                        },
+                        onRelease = { view -> view.release() },
+                        // 이 앱의 기본 소스는 숏츠다 — 세로 9:16 틀에 담는다.
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .aspectRatio(9f / 16f, matchHeightConstraintsFirst = true),
+                    )
+                }
             }
         }
 
@@ -196,11 +216,11 @@ internal fun SessionScreen(
             )
         }
 
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(12.dp))
         Text(stageLabel(ui.stage, options), style = MaterialTheme.typography.titleMedium)
 
-        Spacer(Modifier.height(12.dp))
-        Box(Modifier.fillMaxWidth().height(140.dp), contentAlignment = Alignment.Center) {
+        Spacer(Modifier.height(8.dp))
+        Box(Modifier.fillMaxWidth().heightIn(min = 120.dp), contentAlignment = Alignment.Center) {
             Column(Modifier.fillMaxWidth()) {
                 if (ui.showSubtitle) {
                     // §7.2 — 1·2단계는 자막을 보여 주고 3단계는 숨긴다.
@@ -237,7 +257,7 @@ internal fun SessionScreen(
             }
         }
 
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(12.dp))
 
         if (ui.recording) {
             Button(onClick = { controller.finishRecording() }, modifier = Modifier.fillMaxWidth()) {
@@ -252,13 +272,24 @@ internal fun SessionScreen(
             )
         }
 
-        // L1 — 원본과 내 녹음을 번갈아 듣는다.
-        TextButton(
-            onClick = { controller.playbackComparison() },
-            enabled = !ui.recording && ui.hasRecording,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("내 녹음과 비교해 듣기")
+        Row(Modifier.fillMaxWidth()) {
+            // 못 알아들었으면 이 문장을 다시 듣는다. 카운트는 오르지 않고 같은 단계를 다시 한다.
+            OutlinedButton(
+                onClick = { controller.replayCurrent() },
+                enabled = ui.playsSource && !ui.finished,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("다시 듣기")
+            }
+            Spacer(Modifier.width(8.dp))
+            // L1 — 원본과 내 녹음을 번갈아 듣는다.
+            OutlinedButton(
+                onClick = { controller.playbackComparison() },
+                enabled = !ui.recording && ui.hasRecording,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("내 녹음과 비교")
+            }
         }
 
         TextButton(onClick = { onFinished(controller.achievedSec, controller.completedCounts) }) {

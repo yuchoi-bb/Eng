@@ -240,6 +240,24 @@ internal class SessionController(
         }
     }
 
+    /**
+     * 다시 듣기 — 현재 문장을 한 번 더 들려주고 **같은 단계를 처음부터** 이어 간다.
+     *
+     * 카운트는 올리지 않는다. 녹음 중이었다면 그 발화는 버린다 — 못 알아듣고 다시 들은
+     * 회차를 완주로 치면 §7.2의 카운트가 부풀려진다.
+     */
+    fun replayCurrent() {
+        val step = engine.currentStep ?: return
+        if (!playsSource) return
+        if (isRecording && options.recordsVoice) {
+            recorder.stop(SentenceId.of(plan.id, step.sentenceIndex).value)
+        }
+        // 비교 재생 중이었다면 그 완료 콜백이 단계를 다시 시작하지 않도록 끊는다.
+        recordingPlayer.release()
+        // 재생기의 완료 콜백은 playSegment가 새로 덮어쓴다 — 이전 재생의 콜백은 오지 않는다.
+        beginStage()
+    }
+
     private fun latestRecordingFor(sentenceIndex: Int): File? =
         recorder.latestRecording(SentenceId.of(plan.id, sentenceIndex).value)
 
