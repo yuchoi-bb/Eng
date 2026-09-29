@@ -123,6 +123,7 @@ internal fun AppRoot(
             initialYouTubeVideoId = current.youTubeVideoId,
             hasApiKey = remember(keyRevision) { apiKeys.hasKey },
             onTranscribe = { videoId -> transcriber.transcribeYouTube(videoId) },
+            onTranscribeUpload = { uri, onProgress -> transcriber.transcribeUpload(context, uri, onProgress) },
             onOpenApiKeySettings = { screen = Screen.ApiKeySettings },
             onCancel = { screen = Screen.Home },
             onSaved = { plan, localUri ->

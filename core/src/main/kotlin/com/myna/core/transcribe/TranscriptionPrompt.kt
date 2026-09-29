@@ -34,4 +34,21 @@ public object TranscriptionPrompt {
 
         Do not compute, summarise, or give advice. Fill the schema fields only.
     """.trimIndent()
+
+    /**
+     * 기기에서 고른 영상용. 소리가 기준이고, 화면의 자막은 철자와 문장 경계를 돕는 보조다.
+     *
+     * 자막은 편집 과정에서 말과 어긋나거나 요약되는 경우가 많다. 그래서 자막을 받아 적지
+     * 말고 들리는 말을 적게 한다. 한국어 자막이 입혀진 영상은 해석의 참고로만 쓴다.
+     */
+    public val forUploadedVideo: String = forVideo + "\n\n" + """
+        This video file may have subtitles or captions burned into the picture.
+        - The audio is the source of truth. Transcribe what is spoken, not what is written.
+        - Use English on-screen captions only to get spelling, names, and sentence boundaries
+          right when the audio is unclear.
+        - Timestamps must follow when the words are spoken, not when captions appear.
+        - Ignore on-screen text that is not spoken (titles, watermarks, usernames).
+        - If Korean subtitles are shown, you may use them as a hint for translationKo, but keep
+          translationKo natural spoken Korean for what is actually said.
+    """.trimIndent()
 }

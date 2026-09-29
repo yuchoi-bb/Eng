@@ -109,6 +109,9 @@ internal fun ManualEntryScreen(
     onSaved: (VideoPlan, String?) -> Unit,
     editing: VideoPlan? = null,
     onEdited: (plan: VideoPlan, originOfNew: List<Int?>) -> Unit = { _, _ -> },
+    /** 기기 영상 전사. 올리는 중·처리 중 같은 진행 상황을 두 번째 인자로 알린다. */
+    onTranscribeUpload: suspend (videoUri: Uri, onProgress: (String) -> Unit) -> TranscribeResult =
+        { _, _ -> TranscribeResult.NoApiKey },
 ) {
     val scope = rememberCoroutineScope()
     var transcribing by remember { mutableStateOf(false) }
@@ -125,6 +128,10 @@ internal fun ManualEntryScreen(
     }
     // 분석 결과나 저장된 전사. 유형·수준·표현처럼 입력칸에 없는 값을 저장할 때 이어받는다.
     var baseTranscript by remember { mutableStateOf(editing?.transcript) }
+    // 어느 기기 영상을 분석한 결과인가. 분석 뒤 다른 영상을 고르면 그 결과를 쓰지 않는다.
+    var analyzedUri by remember { mutableStateOf<Uri?>(null) }
+    // 기기 영상은 올리고 처리하는 데 시간이 걸린다. 지금 무엇을 하는지 보여 준다.
+    var progressText by remember { mutableStateOf<String?>(null) }
 
     // 방금 지운 문장. 되돌릴 수 있게 한 번 들고 있는다.
     var lastDeleted by remember { mutableStateOf<Pair<Int, SentenceDraft>?>(null) }
@@ -236,23 +243,33 @@ internal fun ManualEntryScreen(
                     )
                 }
 
-                // 자동 채우기. 유튜브 링크가 있을 때만 의미가 있다 — 기기 영상은 전사 경로가 다르다.
+                // 자동 채우기. 유튜브는 링크로, 기기 영상은 파일을 올려서 분석한다.
                 val readyVideoId = youTubeVideoId
-                if (readyVideoId != null) {
+                val readyUri = videoUri
+                if (readyVideoId != null || readyUri != null) {
                     item {
                         TranscribeButton(
                             hasApiKey = hasApiKey,
                             transcribing = transcribing,
+                            progressText = progressText,
+                            isUpload = readyVideoId == null,
                             onOpenApiKeySettings = onOpenApiKeySettings,
                             onClick = {
                                 scope.launch {
                                     transcribing = true
                                     error = null
+                                    progressText = null
                                     stopPreview()
-                                    when (val result = onTranscribe(readyVideoId)) {
+                                    val result = if (readyVideoId != null) {
+                                        onTranscribe(readyVideoId)
+                                    } else {
+                                        onTranscribeUpload(readyUri!!) { progressText = it }
+                                    }
+                                    when (result) {
                                         is TranscribeResult.Success -> {
                                             val transcript = result.accepted.transcript
                                             baseTranscript = transcript
+                                            analyzedUri = readyUri
                                             drafts.clear()
                                             transcript.sentences.forEach { drafts.add(keys.create(it)) }
                                             lastDeleted = null
@@ -267,6 +284,7 @@ internal fun ManualEntryScreen(
                                         is TranscribeResult.Failed -> error = result.message
                                         TranscribeResult.NoApiKey -> onOpenApiKeySettings()
                                     }
+                                    progressText = null
                                     transcribing = false
                                 }
                             },
@@ -344,7 +362,11 @@ internal fun ManualEntryScreen(
                         return@Button
                     }
                     // 분석한 뒤 다른 영상으로 바꿨다면 그 분석 결과는 이 영상 것이 아니다.
-                    val base = baseTranscript?.takeIf { editing != null || it.sourceRef == youTubeId }
+                    val base = baseTranscript?.takeIf {
+                        editing != null ||
+                            (it.source == VideoSource.YOUTUBE && it.sourceRef == youTubeId) ||
+                            (it.source == VideoSource.UPLOAD && localUri != null && analyzedUri == localUri)
+                    }
                     when (val result = buildTranscript(drafts, youTubeId, base)) {
                         is BuildResult.Failure -> error = result.message
                         is BuildResult.Success -> {
@@ -410,20 +432,26 @@ private fun SourceInputs(
 private fun TranscribeButton(
     hasApiKey: Boolean,
     transcribing: Boolean,
+    progressText: String?,
+    isUpload: Boolean,
     onOpenApiKeySettings: () -> Unit,
     onClick: () -> Unit,
 ) {
     Column(Modifier.padding(top = 8.dp)) {
         if (hasApiKey) {
             Button(onClick = onClick, enabled = !transcribing, modifier = Modifier.fillMaxWidth()) {
-                Text(if (transcribing) "영상을 듣는 중…" else "문장 자동으로 채우기")
+                Text(if (transcribing) "영상을 분석하는 중…" else "문장 자동으로 채우기")
             }
-            if (transcribing) {
-                Text(
-                    "영상 전체를 듣고 받아 적는 중입니다. 길이에 따라 1분 정도 걸립니다.",
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
+            val note = when {
+                transcribing && progressText != null -> progressText
+                transcribing -> "영상 전체를 듣고 받아 적는 중입니다. 길이에 따라 1분 정도 걸립니다."
+                // 기기 영상은 Gemini에 올린다. 모바일 데이터라면 용량을 알아 두는 편이 낫다.
+                isUpload -> "영상을 Gemini에 올려 소리와 화면 자막을 함께 보고 문장·해석을 채웁니다. " +
+                    "다 쓰면 올린 영상은 지웁니다."
+                else -> null
+            }
+            note?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
             }
         } else {
             TextButton(onClick = onOpenApiKeySettings, modifier = Modifier.fillMaxWidth()) {

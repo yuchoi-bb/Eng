@@ -119,4 +119,43 @@ class GeminiExchangeTest {
         assertEquals("API key not valid", GeminiExchange.errorMessage(body))
         assertNull(GeminiExchange.errorMessage(envelope(transcriptJson)))
     }
+
+    // --- 기기 영상 ---
+
+    @Test
+    fun `기기 영상은 올린 파일 URI와 형식을 넘긴다`() {
+        val request = GeminiExchange.requestForUploadedVideo(
+            fileUri = "https://generativelanguage.googleapis.com/v1beta/files/abc",
+            mimeType = "video/mp4",
+        )
+        val parts = request["contents"]!!.jsonArray[0].jsonObject["parts"]!!.jsonArray
+        val fileData = parts[0].jsonObject["file_data"]!!.jsonObject
+        assertEquals("video/mp4", fileData["mime_type"]!!.jsonPrimitive.content)
+        assertEquals("https://generativelanguage.googleapis.com/v1beta/files/abc", fileData["file_uri"]!!.jsonPrimitive.content)
+        // 화면에 입혀진 자막을 어떻게 다룰지 알려 준다.
+        assertTrue(parts[1].jsonObject["text"]!!.jsonPrimitive.content.contains("burned into the picture"))
+    }
+
+    @Test
+    fun `기기 영상 재요청도 temperature를 0으로 낮춘다`() {
+        val retry = GeminiExchange.requestForUploadedVideo("uri", "video/mp4", retry = true)
+        assertEquals("0.0", retry["generationConfig"]!!.jsonObject["temperature"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `기기 영상 전사는 UPLOAD로 채운다`() {
+        val raw = GeminiExchange.parseTranscript(envelope(transcriptJson), VideoSource.UPLOAD, "local-1")!!
+        assertEquals(VideoSource.UPLOAD.name, raw.source)
+        assertEquals("local-1", raw.sourceRef)
+    }
+
+    @Test
+    fun `영상 전사의 시각은 초 단위로 본다`() {
+        // 모델이 영상을 보고 적은 시각은 초 단위로만 맞다. SECOND여야 재생할 때 앞뒤 여유가 붙는다.
+        val raw = GeminiExchange.parseTranscript(envelope(transcriptJson), videoId)!!
+        val accepted = assertIs<ValidationResult.Accepted>(TranscriptValidator.validate(raw))
+        assertEquals(com.myna.core.model.TimestampUnit.SECOND, accepted.transcript.timestampUnit)
+        // 예전에는 여기서 매번 폴백 수선이 남아 "자동으로 고쳤다"는 안내가 떴다.
+        assertTrue(accepted.repairs.none { it is com.myna.core.transcript.Repair.FellBackEnum && it.field == "timestampUnit" })
+    }
 }
