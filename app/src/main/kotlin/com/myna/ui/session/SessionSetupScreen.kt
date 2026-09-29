@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -53,8 +54,10 @@ internal fun SessionSetupScreen(
     /** 필요 없는 문장을 지우고 시작·끝을 맞춘다. 영상이 있는 계획에서만. */
     onEditSentences: () -> Unit,
 ) {
-    var autoReps by remember { mutableStateOf(plan.autoReps) }
-    var manualReps by remember { mutableStateOf(plan.targetReps.toString()) }
+    // 자동 계산값은 지금의 하루 목표로 다시 낸다. 목표가 적응(§4.7)으로 바뀌었을 수 있다.
+    val suggested = RepsCalculator.suggestedReps(dailyTargetSec, plan.transcript)
+    // 계산값을 먼저 채워 두고, 사용자가 −/+나 직접 입력으로 고친다. 전에 직접 정한 값이 있으면 그 값.
+    var repsText by remember { mutableStateOf((if (plan.autoReps) suggested else plan.targetReps).toString()) }
     var whisper by remember { mutableStateOf(false) }
 
     // 현장 메모로 적은 문장은 원본 영상이 없다. 들려줄 것이 없는데 재생기를 기다리면
@@ -66,7 +69,9 @@ internal fun SessionSetupScreen(
     val offlineReview = !sourceAudioAvailable && !isNote
 
     val speechSec = RepsCalculator.speechSec(plan.transcript)
-    val effectiveReps = if (autoReps) plan.suggestedReps else manualReps.toIntOrNull() ?: plan.suggestedReps
+    val effectiveReps = (repsText.toIntOrNull() ?: suggested).coerceIn(1, MAX_REPS)
+    // 계산값과 같으면 자동 모드로 둔다 — 하루 목표가 바뀌면 다음에 다시 계산된다.
+    val autoReps = effectiveReps == suggested
     val projectedSec = effectiveReps * speechSec
 
     // 이어서 하기 버튼과 수동 횟수 입력이 겹치면 작은 화면에서 넘친다. 스크롤을 둔다.
@@ -109,25 +114,39 @@ internal fun SessionSetupScreen(
         }
 
         Spacer(Modifier.height(20.dp))
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("횟수 자동 계산")
-                Text(
-                    "하루 목표에서 역산합니다 (${plan.suggestedReps}회 제시)",
-                    style = MaterialTheme.typography.bodySmall,
-                )
+        Text("반복 횟수 · 문장마다", style = MaterialTheme.typography.titleSmall)
+        Row(
+            Modifier.fillMaxWidth().padding(top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedButton(onClick = { repsText = (effectiveReps - 1).coerceAtLeast(1).toString() }) {
+                Text("−")
             }
-            Switch(checked = autoReps, onCheckedChange = { autoReps = it })
-        }
-
-        if (!autoReps) {
             OutlinedTextField(
-                value = manualReps,
-                onValueChange = { manualReps = it.filter(Char::isDigit) },
-                label = { Text("반복 횟수") },
+                value = repsText,
+                onValueChange = { repsText = it.filter(Char::isDigit).take(2) },
+                singleLine = true,
+                suffix = { Text("회") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
             )
+            OutlinedButton(onClick = { repsText = (effectiveReps + 1).coerceAtMost(MAX_REPS).toString() }) {
+                Text("+")
+            }
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (autoReps) {
+                    "자동 계산값입니다 — 하루 목표 ${formatDuration(dailyTargetSec)}에 맞춘 횟수"
+                } else {
+                    "직접 정한 횟수입니다 (자동 계산값 ${suggested}회)"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f),
+            )
+            if (!autoReps) {
+                TextButton(onClick = { repsText = suggested.toString() }) { Text("자동값으로") }
+            }
         }
 
         Spacer(Modifier.height(20.dp))
@@ -156,6 +175,7 @@ internal fun SessionSetupScreen(
             onStart(
                 plan.copy(
                     autoReps = autoReps,
+                    suggestedReps = suggested,
                     targetReps = reps,
                     // 처음부터를 골랐으면 예전 자리를 지운다. 한 문장도 안 하고 나가도
                     // 다음에 다시 예전 자리를 권하지 않게.
@@ -219,3 +239,6 @@ private fun offlineNotice(status: OfflinePlanStatus): String = when (status.avai
         "회선이 없고 이 영상은 아직 한 번도 들어 보지 않았습니다. " +
             "처음 듣는 문장은 자막만 보고 따라 해도 효과가 없으니, 연결된 뒤에 시작해 주세요."
 }
+
+/** 반복 횟수 상한. 입력칸은 두 자리까지 받는다. */
+private const val MAX_REPS = 99
