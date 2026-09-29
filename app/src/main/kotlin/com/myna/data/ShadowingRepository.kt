@@ -166,6 +166,18 @@ public class ShadowingRepository(private val store: LocalStore) {
         }
     }
 
+    /**
+     * 다음 문장으로 건너뛰었을 때 이어서 할 자리만 옮긴다. 말하지 않았으니 시간·횟수는 그대로다.
+     * 마지막 문장에서 건너뛰었으면(null) 다음에는 처음부터 한다 — 다 끝낸 것은 아니므로
+     * "완료"로 세지 않는다.
+     */
+    public fun saveResumePosition(planId: String, position: PlanPosition?) {
+        mutate { current ->
+            val plan = current.plans[planId] ?: return@mutate current
+            current.copy(plans = current.plans + (planId to plan.copy(resumeAt = position)))
+        }
+    }
+
     /** "외웠어요" / "헷갈려요". 외운 문장은 다음 회차부터 듣지 않고 바로 말한다. */
     public fun setMemorized(planId: String, sentenceIndex: Int, memorized: Boolean) {
         mutate { current ->

@@ -225,4 +225,46 @@ class SessionProgressTest {
         assertEquals(2, engine.currentSentenceNumber)
         assertEquals(ShadowingStage.SHADOW_WITH_TEXT, engine.currentStage)
     }
+
+    // ---------- 다음 문장으로 건너뛰기 ----------
+
+    @Test
+    fun `다음 문장으로 건너뛰면 남은 회차를 넘기고 1회차부터 한다`() {
+        val engine = SessionEngine(plan(threeSentences, targetReps = 5))
+        engine.completeStep() // 문장 1의 1회차
+
+        assertEquals(PlanPosition(1, 0), engine.skipSentence())
+        assertEquals(2, engine.currentSentenceNumber)
+        assertEquals(1, engine.currentRep)
+        // 새 문장의 첫 회차이므로 듣기부터.
+        assertEquals(ShadowingStage.LISTEN, engine.currentStage)
+    }
+
+    @Test
+    fun `건너뛴 회차는 세지 않는다`() {
+        val engine = SessionEngine(plan(threeSentences, targetReps = 5))
+        engine.completeStep()
+        engine.skipSentence()
+
+        assertEquals(1, engine.completedCounts)
+        assertEquals(2, engine.achievedSec)
+        // 진행바는 건너뛴 자리까지 간다 — 문장 1의 5회분.
+        assertEquals(5, engine.overallCompletedCounts)
+    }
+
+    @Test
+    fun `말하던 중에 건너뛰어도 그 걸음은 세지 않는다`() {
+        val engine = SessionEngine(plan(threeSentences, targetReps = 2))
+        engine.completeStage()
+        engine.completeStage() // 1회차 자막 끄고 말하기 중
+        engine.skipSentence()
+        assertEquals(0, engine.completedCounts)
+    }
+
+    @Test
+    fun `마지막 문장에서 건너뛰면 세션이 끝난다`() {
+        val engine = SessionEngine(plan(threeSentences, targetReps = 2), startAt = PlanPosition(2, 0))
+        assertNull(engine.skipSentence())
+        assertTrue(engine.isFinished)
+    }
 }

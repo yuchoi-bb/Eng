@@ -238,6 +238,9 @@ internal fun AppRoot(
                     onMemorizedChanged = { index, memorized ->
                         repository.setMemorized(current.planId, index, memorized)
                     },
+                    onSentenceSkipped = { next ->
+                        if (savesPosition) repository.saveResumePosition(current.planId, next)
+                    },
                     onExit = {
                         repository.applyBudgetAdaptation(today)
                         screen = Screen.Home

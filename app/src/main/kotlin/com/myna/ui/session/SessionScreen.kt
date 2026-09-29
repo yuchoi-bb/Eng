@@ -75,12 +75,15 @@ internal fun SessionScreen(
     /** 한 문장을 끝낼 때마다 — 그 자리에서 저장한다. */
     onCountCompleted: (SessionEvent.CountCompleted) -> Unit,
     onMemorizedChanged: (sentenceIndex: Int, memorized: Boolean) -> Unit,
+    /** 다음 문장으로 건너뛰었다. null이면 마지막 문장이었다. */
+    onSentenceSkipped: (next: PlanPosition?) -> Unit,
     onExit: () -> Unit,
 ) {
     val context = LocalContext.current
     // 컨트롤러는 세션 동안 한 번만 만든다. 콜백은 최신 것을 부르도록 감싸 둔다.
     val latestOnCount by rememberUpdatedState(onCountCompleted)
     val latestOnMemorized by rememberUpdatedState(onMemorizedChanged)
+    val latestOnSkipped by rememberUpdatedState(onSentenceSkipped)
     val controller = remember(plan.id.value) {
         SessionController(
             context = context,
@@ -95,6 +98,7 @@ internal fun SessionScreen(
             sentenceFilter = sentenceFilter,
             onCountCompleted = { latestOnCount(it) },
             onMemorizedChanged = { index, memorized -> latestOnMemorized(index, memorized) },
+            onSentenceSkipped = { next -> latestOnSkipped(next) },
         )
     }
     val ui by controller.uiState
@@ -283,7 +287,7 @@ internal fun SessionScreen(
 
         if (ui.recording) {
             Button(onClick = { controller.finishRecording() }, modifier = Modifier.fillMaxWidth()) {
-                Text(if (options.voiceMode == VoiceMode.WHISPER) "다음" else "말하기 끝")
+                Text(if (options.voiceMode == VoiceMode.WHISPER) "말했어요" else "말하기 끝")
             }
         } else {
             Text(
@@ -305,18 +309,26 @@ internal fun SessionScreen(
                 Text("다시 듣기")
             }
             Spacer(Modifier.width(8.dp))
-            // L1 — 원본과 내 녹음을 번갈아 듣는다.
+            // 너무 쉽거나 따라 할 필요 없는 문장은 남은 회차를 건너뛴다. 건너뛴 회차는 세지 않는다.
             OutlinedButton(
+                onClick = { controller.skipSentence() },
+                enabled = !ui.finished,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("다음 문장 ⏭")
+            }
+        }
+
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            // L1 — 원본과 내 녹음을 번갈아 듣는다.
+            TextButton(
                 onClick = { controller.playbackComparison() },
                 // 외운 문장의 비교 재생 중에 누르면 그 걸음이 카운트 없이 처음으로 돌아간다.
                 enabled = !ui.recording && !ui.checking && ui.hasRecording,
                 modifier = Modifier.weight(1f),
             ) {
-                Text("내 녹음과 비교")
+                Text("내 녹음 비교")
             }
-        }
-
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             if (ui.memorized) {
                 // 막혔으면 외운 문장 표시를 풀고 듣고 따라 하기로 돌아간다.
                 TextButton(onClick = { controller.unmarkMemorized() }, modifier = Modifier.weight(1f)) {
@@ -334,7 +346,7 @@ internal fun SessionScreen(
             }
             // 진행은 문장마다 저장되므로 언제 나가도 다음에 이 자리에서 이어서 한다.
             TextButton(onClick = onExit, modifier = Modifier.weight(1f)) {
-                Text(if (ui.dailyGoalMet) "목표 달성 · 마치기" else "여기까지 하기")
+                Text(if (ui.dailyGoalMet) "목표 달성 ✓" else "여기까지")
             }
         }
     }

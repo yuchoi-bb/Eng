@@ -79,6 +79,8 @@ internal class SessionController(
     private val onCountCompleted: (SessionEvent.CountCompleted) -> Unit = {},
     /** 외웠어요 / 헷갈려요. */
     private val onMemorizedChanged: (sentenceIndex: Int, memorized: Boolean) -> Unit = { _, _ -> },
+    /** 다음 문장으로 건너뛰었다. 이어서 할 자리를 저장한다. null이면 마지막 문장이었다. */
+    private val onSentenceSkipped: (next: PlanPosition?) -> Unit = {},
 ) {
     private val recorder = SentenceRecorder(context)
     private val recordingPlayer = RecordingPlayer()
@@ -296,6 +298,24 @@ internal class SessionController(
         _uiState.value = snapshot()
         source?.playSegment(segmentFor(step.unit, sentence), playbackRate) {
             afterPlayback(step.sentenceIndex)
+        }
+    }
+
+    /**
+     * 다음 문장 — 지금 문장의 남은 회차를 건너뛴다. 말하던 중이었어도 카운트는 올리지 않는다.
+     */
+    fun skipSentence() {
+        val step = engine.currentStep ?: return
+        stopSpeakingWithoutCount(step.sentenceIndex)
+        recordingPlayer.release()
+        source?.pause()
+        isChecking = false
+        val next = engine.skipSentence()
+        onSentenceSkipped(next)
+        if (engine.isFinished) {
+            _uiState.value = snapshot().copy(finished = true)
+        } else {
+            beginStage()
         }
     }
 

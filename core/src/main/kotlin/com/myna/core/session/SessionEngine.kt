@@ -206,6 +206,25 @@ public class SessionEngine(
         if (currentStage == ShadowingStage.LISTEN) restartStep()
     }
 
+    /**
+     * 지금 문장의 남은 회차를 건너뛰고 **다음 문장의 1회차**로 간다.
+     *
+     * 너무 쉽거나 따라 할 필요 없는 문장에서 반복을 다 채우라고 하면 앱을 닫게 된다.
+     * 건너뛴 회차는 카운트도 발화 시간도 올리지 않는다 — 말하지 않았으니까.
+     *
+     * @return 다음 자리. 마지막 문장이었으면 null이고 세션이 끝난다.
+     */
+    public fun skipSentence(): PlanPosition? {
+        val current = currentStep ?: return null
+        // 걸음은 문장별로 붙어 있다(SessionPlan.expand). 같은 문장이 끝나는 곳까지 넘긴다.
+        var next = stepCursor
+        while (next < steps.size && steps[next].sentenceIndex == current.sentenceIndex) next += 1
+        stepCursor = next
+        restartStep()
+        skipMemorizedBreathSteps()
+        return position
+    }
+
     private fun restartStep() {
         stageIndex = 0
         currentStages = stagesForCurrentStep()
