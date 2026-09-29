@@ -50,6 +50,8 @@ internal fun SessionSetupScreen(
     /** 세 번째 값: 저장된 자리에서 이어서 하는가. */
     onStart: (VideoPlan, SessionOptions, Boolean) -> Unit,
     onBack: () -> Unit,
+    /** 필요 없는 문장을 지우고 시작·끝을 맞춘다. 영상이 있는 계획에서만. */
+    onEditSentences: () -> Unit,
 ) {
     var autoReps by remember { mutableStateOf(plan.autoReps) }
     var manualReps by remember { mutableStateOf(plan.targetReps.toString()) }
@@ -74,6 +76,9 @@ internal fun SessionSetupScreen(
         Spacer(Modifier.height(16.dp))
         Text("문장 ${plan.sentences.size}개 · 발화 ${formatDuration(speechSec)}")
         Text("유형 ${plan.transcript.type}", style = MaterialTheme.typography.bodySmall)
+        if (!isNote) {
+            TextButton(onClick = onEditSentences) { Text("문장 편집 · 지우기와 구간 맞추기") }
+        }
         if (plan.memorizedCount > 0) {
             Text(
                 "외운 문장 ${plan.memorizedCount}/${plan.sentences.size} — 듣지 않고 바로 말합니다",

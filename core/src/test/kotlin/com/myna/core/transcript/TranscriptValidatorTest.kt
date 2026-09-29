@@ -171,4 +171,19 @@ class TranscriptValidatorTest {
         val result = TranscriptValidator.validate(raw().copy(schemaVersion = 2))
         assertEquals(RejectionReason.UNSUPPORTED_SCHEMA_VERSION, assertIs<ValidationResult.Rejected>(result).reason)
     }
+
+    @Test
+    fun `결과의 각 문장이 입력의 몇 번에서 왔는지 남긴다`() {
+        // 편집 화면이 외운 문장·이어서 하기 자리를 새 번호로 옮기는 데 쓴다.
+        val result = TranscriptValidator.validate(
+            raw(
+                sentences = listOf(
+                    okSentence(0, startMs = 4_000, endMs = 6_000),
+                    okSentence(1, startMs = 3_000, endMs = 1_000), // V-2로 탈락
+                    okSentence(2, startMs = 0, endMs = 2_000),
+                ),
+            ),
+        )
+        assertEquals(listOf<Int?>(2, 0), assertIs<ValidationResult.Accepted>(result).sourceIndexes)
+    }
 }

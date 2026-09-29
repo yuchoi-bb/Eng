@@ -9,6 +9,7 @@ import com.myna.core.model.VideoPlan
 import com.myna.core.notes.FieldNote
 import com.myna.core.notes.NoteSituation
 import com.myna.core.notes.NotePractice
+import com.myna.core.plan.PlanEdit
 import com.myna.core.store.AppState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -147,6 +148,20 @@ public class ShadowingRepository(private val store: LocalStore) {
                 plans = current.plans + (planId to progressed),
                 // 한 번 이상 완주한 문장 — 오프라인에서 무엇을 복습할 수 있는지가 여기서 나온다.
                 clearedSentenceIds = current.clearedSentenceIds + SentenceId.of(plan.id, sentenceIndex).value,
+            )
+        }
+    }
+
+    /**
+     * 저장된 영상의 문장을 고친 결과로 바꾼다. 번호가 바뀌므로 "한 번 이상 완주한 문장"
+     * 기록도 새 번호로 옮긴다 — 외운 문장과 이어서 하기 자리는 [PlanEdit]이 이미 옮겼다.
+     */
+    public fun replaceSentences(edited: VideoPlan, originOfNew: List<Int?>) {
+        mutate { current ->
+            val old = current.plans[edited.id.value] ?: return@mutate current
+            current.copy(
+                plans = current.plans + (edited.id.value to edited),
+                clearedSentenceIds = PlanEdit.remapClearedIds(current.clearedSentenceIds, old, originOfNew),
             )
         }
     }

@@ -27,6 +27,7 @@ import com.myna.ui.notes.CaptureNoteScreen
 import com.myna.ui.notes.NoteListScreen
 import com.myna.ui.notes.ResolveNoteScreen
 import com.myna.ui.update.UpdateGate
+import com.myna.transcribe.TranscribeResult
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.collectAsState as collectFlowAsState
 import java.time.LocalDate
@@ -40,6 +41,8 @@ internal sealed interface Screen {
     data object Home : Screen
     data class ManualEntry(val videoUri: Uri?, val youTubeVideoId: String? = null) : Screen
     data class SessionSetup(val planId: String) : Screen
+    /** 저장된 영상의 문장을 고친다 — 필요 없는 문장 지우기, 시작·끝 맞추기. */
+    data class EditPlan(val planId: String) : Screen
     /** @param resume 저장된 자리에서 이어서 한다. false면 처음부터. */
     data class Session(val planId: String, val options: SessionOptions, val resume: Boolean) : Screen
     data object CaptureNote : Screen
@@ -147,6 +150,33 @@ internal fun AppRoot(
                         screen = Screen.Session(adjusted.id.value, options, resume)
                     },
                     onBack = { screen = Screen.Home },
+                    onEditSentences = { screen = Screen.EditPlan(plan.id.value) },
+                )
+            }
+        }
+
+        is Screen.EditPlan -> {
+            val plan = state.plans[current.planId]
+            if (plan == null) {
+                LaunchedEffect(current.planId) { screen = Screen.Home }
+            } else {
+                val source = plan.transcript.source
+                ManualEntryScreen(
+                    initialVideoUri = repository.localMediaUri(current.planId)
+                        ?.takeIf { source == VideoSource.UPLOAD }
+                        ?.let(Uri::parse),
+                    initialYouTubeVideoId = plan.transcript.sourceRef.takeIf { source == VideoSource.YOUTUBE },
+                    dailyTargetSec = state.settings.dailyTargetSec,
+                    hasApiKey = false,
+                    onTranscribe = { TranscribeResult.NoApiKey },
+                    onOpenApiKeySettings = {},
+                    onCancel = { screen = Screen.SessionSetup(current.planId) },
+                    onSaved = { _, _ -> },
+                    editing = plan,
+                    onEdited = { edited, originOfNew ->
+                        repository.replaceSentences(edited, originOfNew)
+                        screen = Screen.SessionSetup(current.planId)
+                    },
                 )
             }
         }

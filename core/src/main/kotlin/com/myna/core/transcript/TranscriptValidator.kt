@@ -15,6 +15,13 @@ public sealed interface ValidationResult {
     public data class Accepted(
         val transcript: Transcript,
         val repairs: List<Repair>,
+        /**
+         * 결과의 각 문장이 입력의 어느 문장(`RawSentence.index`)에서 왔는가.
+         *
+         * 검증은 문장을 빼고 시작 시각순으로 다시 정렬한 뒤 번호를 새로 매긴다. 편집 화면이
+         * 외운 문장·이어서 하기 자리를 새 번호로 옮기려면 이 대응이 필요하다.
+         */
+        val sourceIndexes: List<Int?> = emptyList(),
     ) : ValidationResult
 
     public data class Rejected(val reason: RejectionReason) : ValidationResult
@@ -168,6 +175,7 @@ public object TranscriptValidator {
                 warnings = warnings,
             ),
             repairs = repairs,
+            sourceIndexes = ordered.map { it.index },
         )
     }
 
