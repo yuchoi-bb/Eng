@@ -162,7 +162,9 @@ internal fun SessionScreen(
                     val mediaUri = activeSource.uri
                     AndroidView(
                         factory = { viewContext ->
-                            val playback = SegmentPlayer(viewContext).apply { this.mediaUri = mediaUri }
+                            // 열지 못하면 자막만 보고 이어 간다 — 유튜브 임베드 거부와 같은 경로다.
+                            val playback = SegmentPlayer(viewContext, onError = controller::onSourceRefused)
+                                .apply { this.mediaUri = mediaUri }
                             controller.attachSource(playback)
                             // PlayerView는 영상 고유 비율로 맞춰 그린다(RESIZE_MODE_FIT) — 가로든 세로든.
                             PlayerView(viewContext).apply {

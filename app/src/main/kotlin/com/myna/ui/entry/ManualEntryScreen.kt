@@ -34,6 +34,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -53,6 +54,7 @@ import com.myna.core.transcript.RawSentence
 import com.myna.core.transcript.RawTranscript
 import com.myna.core.transcript.TranscriptValidator
 import com.myna.core.transcript.ValidationResult
+import com.myna.media.LocalVideos
 import com.myna.media.SourcePlayback
 import com.myna.transcribe.TranscribeResult
 import kotlinx.coroutines.launch
@@ -111,11 +113,14 @@ internal fun ManualEntryScreen(
     onSaved: (VideoPlan, String?) -> Unit,
     editing: VideoPlan? = null,
     onEdited: (plan: VideoPlan, originOfNew: List<Int?>) -> Unit = { _, _ -> },
+    /** 저장 중(기기 영상을 앱에 복사하는 중). 저장 버튼을 막는다. */
+    saving: Boolean = false,
     /** 기기 영상 전사. 올리는 중·처리 중 같은 진행 상황을 두 번째 인자로 알린다. */
     onTranscribeUpload: suspend (videoUri: Uri, onProgress: (String) -> Unit) -> TranscribeResult =
         { _, _ -> TranscribeResult.NoApiKey },
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var transcribing by remember { mutableStateOf(false) }
     var videoUri by remember { mutableStateOf(initialVideoUri) }
     var youTubeVideoId by remember { mutableStateOf(initialYouTubeVideoId) }
@@ -194,6 +199,8 @@ internal fun ManualEntryScreen(
         ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
         if (uri != null) {
+            // 분석에 1분 넘게 걸리는 동안 앱이 닫혀도 저장할 때 영상을 열 수 있게 한다.
+            LocalVideos.keepAccess(context, uri)
             videoUri = uri
             youTubeVideoId = null // 두 소스를 동시에 둘 수 없다
         }
@@ -401,9 +408,16 @@ internal fun ManualEntryScreen(
                         }
                     }
                 },
+                enabled = !saving && !transcribing,
                 modifier = Modifier.weight(1f),
             ) {
-                Text(if (editing != null) "저장" else "저장하고 시작")
+                Text(
+                    when {
+                        saving -> "영상을 저장하는 중…"
+                        editing != null -> "저장"
+                        else -> "저장하고 시작"
+                    },
+                )
             }
         }
     }

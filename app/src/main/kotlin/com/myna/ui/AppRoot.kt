@@ -1,6 +1,12 @@
 package com.myna.ui
 
 import android.net.Uri
+import android.widget.Toast
+import androidx.compose.runtime.rememberCoroutineScope
+import com.myna.media.LocalVideos
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -69,6 +75,11 @@ internal fun AppRoot(
     var keyRevision by remember { mutableStateOf(0) }
     // 설정의 "새 버전 지금 확인"을 누를 때마다 오른다.
     var updateCheckRequest by remember { mutableStateOf(0) }
+    val scope = rememberCoroutineScope()
+    // 기기 영상을 앱 저장소로 복사하는 중. 쇼츠면 1초 안쪽이지만 그동안 저장을 두 번 누르지 않게 한다.
+    var importingVideo by remember { mutableStateOf(false) }
+    // 영상을 다시 연결하면 오른다 — "이 기기에서 열 수 있는가"를 다시 본다.
+    var videoRevision by remember { mutableStateOf(0) }
     val online by networkMonitor.observe().collectFlowAsState(initial = networkMonitor.isOnline())
 
     var screen: Screen by remember {
@@ -127,18 +138,57 @@ internal fun AppRoot(
             onOpenApiKeySettings = { screen = Screen.ApiKeySettings },
             onCancel = { screen = Screen.Home },
             onSaved = { plan, localUri ->
-                repository.putPlan(plan, localUri)
-                screen = Screen.SessionSetup(plan.id.value)
+                scope.launch {
+                    // 사진 선택기가 준 주소는 앱이 다시 시작되면 열리지 않는다. 앱 저장소로 복사해 둔다.
+                    importingVideo = true
+                    val stored = localUri?.let { uri ->
+                        withContext(Dispatchers.IO) { LocalVideos.import(context, Uri.parse(uri), plan.id.value) }
+                    }
+                    importingVideo = false
+                    repository.putPlan(plan, stored?.toString() ?: localUri)
+                    screen = Screen.SessionSetup(plan.id.value)
+                }
             },
+            saving = importingVideo,
             dailyTargetSec = state.settings.dailyTargetSec,
         )
 
         is Screen.SessionSetup -> {
             val plan = state.plans[current.planId]
+            val localUri = repository.localMediaUri(current.planId)
+            val isUpload = plan?.transcript?.source == VideoSource.UPLOAD
+            // 기기 영상을 지금 열 수 있는가. 예전 버전은 주소만 저장해서, 앱이 다시 시작되면 못 연다.
+            val videoMissing = remember(current.planId, localUri, videoRevision) {
+                isUpload && (localUri == null || !LocalVideos.canRead(context, Uri.parse(localUri)))
+            }
+            // 아직 열리는 예전 주소라면 지금 앱 저장소로 옮겨 둔다. 다음에 앱이 다시 시작돼도 열린다.
+            LaunchedEffect(current.planId, localUri, videoMissing) {
+                val uri = localUri?.let(Uri::parse) ?: return@LaunchedEffect
+                if (!isUpload || videoMissing || uri.scheme == "file") return@LaunchedEffect
+                val stored = withContext(Dispatchers.IO) { LocalVideos.import(context, uri, current.planId) }
+                if (stored != null && plan != null) repository.putPlan(plan, stored.toString())
+            }
             if (plan == null) {
                 LaunchedEffect(current.planId) { screen = Screen.Home }
             } else {
                 SessionSetupScreen(
+                    videoMissing = videoMissing,
+                    relinkingVideo = importingVideo,
+                    onRelinkVideo = { picked ->
+                        scope.launch {
+                            importingVideo = true
+                            val stored = withContext(Dispatchers.IO) {
+                                LocalVideos.import(context, picked, current.planId)
+                            }
+                            importingVideo = false
+                            if (stored != null) {
+                                repository.putPlan(plan, stored.toString())
+                                videoRevision += 1
+                            } else {
+                                Toast.makeText(context, "영상을 가져오지 못했습니다.", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
                     plan = plan,
                     dailyTargetSec = state.settings.dailyTargetSec,
                     achievedSec = repository.today(today).achievedSec,

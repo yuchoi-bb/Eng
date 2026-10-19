@@ -1,5 +1,9 @@
 package com.myna.ui.session
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -53,7 +57,14 @@ internal fun SessionSetupScreen(
     onBack: () -> Unit,
     /** 필요 없는 문장을 지우고 시작·끝을 맞춘다. 영상이 있는 계획에서만. */
     onEditSentences: () -> Unit,
+    /** 기기 영상을 이 기기에서 열 수 없다. 같은 영상을 다시 골라 연결해야 한다. */
+    videoMissing: Boolean = false,
+    relinkingVideo: Boolean = false,
+    onRelinkVideo: (Uri) -> Unit = {},
 ) {
+    val relinkPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) onRelinkVideo(uri)
+    }
     // 자동 계산값은 지금의 하루 목표로 다시 낸다. 목표가 적응(§4.7)으로 바뀌었을 수 있다.
     val suggested = RepsCalculator.suggestedReps(dailyTargetSec, plan.transcript)
     // 계산값을 먼저 채워 두고, 사용자가 −/+나 직접 입력으로 고친다. 전에 직접 정한 값이 있으면 그 값.
@@ -81,6 +92,25 @@ internal fun SessionSetupScreen(
         Spacer(Modifier.height(16.dp))
         Text("문장 ${plan.sentences.size}개 · 발화 ${formatDuration(speechSec)}")
         Text("유형 ${plan.transcript.type}", style = MaterialTheme.typography.bodySmall)
+        if (videoMissing) {
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "이 기기에서 영상을 열 수 없습니다. 예전 버전은 영상 주소만 저장해서, 앱이 다시 " +
+                    "시작되면 열리지 않았습니다. 같은 영상을 다시 골라 연결해 주세요. " +
+                    "연결하면 앱 안에 저장해 두므로 다시는 끊기지 않습니다.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+            Button(
+                onClick = {
+                    relinkPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
+                },
+                enabled = !relinkingVideo,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            ) {
+                Text(if (relinkingVideo) "영상을 저장하는 중…" else "영상 다시 연결")
+            }
+        }
         if (!isNote) {
             TextButton(onClick = onEditSentences) { Text("문장 편집 · 지우기와 구간 맞추기") }
         }

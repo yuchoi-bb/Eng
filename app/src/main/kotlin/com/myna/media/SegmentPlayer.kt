@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
@@ -19,7 +20,14 @@ import com.myna.core.playback.PlaybackSegment
  * 이 정밀도는 업로드 경로에서만 가능하다 — 유튜브는 [YouTubeSourcePlayback] 참조.
  */
 @OptIn(UnstableApi::class)
-internal class SegmentPlayer(context: Context) : SourcePlayback {
+internal class SegmentPlayer(
+    context: Context,
+    /**
+     * 영상을 열지 못했다. 알리지 않으면 구간 끝(STATE_ENDED)이 영영 오지 않아 화면이
+     * "재생 중…"에서 굳는다.
+     */
+    private val onError: (String) -> Unit = {},
+) : SourcePlayback {
 
     val player: ExoPlayer = ExoPlayer.Builder(context).build()
 
@@ -35,6 +43,19 @@ internal class SegmentPlayer(context: Context) : SourcePlayback {
                     if (playbackState == Player.STATE_ENDED) {
                         onSegmentFinished?.invoke()
                     }
+                }
+
+                override fun onPlayerError(error: PlaybackException) {
+                    onSegmentFinished = null
+                    onError(
+                        if (error.errorCode == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND ||
+                            error.errorCode == PlaybackException.ERROR_CODE_IO_NO_PERMISSION
+                        ) {
+                            "이 기기에서 영상을 열 수 없습니다. 준비 화면에서 [영상 다시 연결]을 눌러 주세요."
+                        } else {
+                            "영상을 재생하지 못했습니다 (${error.errorCodeName})."
+                        },
+                    )
                 }
             },
         )

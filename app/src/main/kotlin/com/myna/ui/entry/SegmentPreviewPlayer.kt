@@ -67,7 +67,8 @@ internal fun SegmentPreviewPlayer(
 
             videoUri != null -> AndroidView(
                 factory = { context ->
-                    val playback = SegmentPlayer(context).apply { mediaUri = videoUri }
+                    val playback = SegmentPlayer(context, onError = { reason -> latestOnRefused(reason) })
+                        .apply { mediaUri = videoUri }
                     latestOnPlayback(playback)
                     PlayerView(context).apply {
                         useController = false

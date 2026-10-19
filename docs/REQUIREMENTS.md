@@ -471,7 +471,7 @@ RecommendationPool(videoId, cefr, wpm, topic, channelId)
 | 항목 | 9.3절 초안 | 확정 |
 |---|---|---|
 | `SentenceProgress.firstRecordingUri` | 로컬 URI 문자열 | **Cloud Storage 객체 경로**. 9.1.1절에서 동기화되는 유일한 녹음이므로 로컬 경로를 넣으면 다른 태블릿에서 F-9 비교 재생이 깨진다 |
-| 업로드 영상 재생 URI | 언급 없음 | **Firestore에 저장하지 않는다.** `content://` URI와 persistable 권한은 그 기기의 그 설치본에만 유효하다. `videoPlanId → 로컬 URI` 매핑은 기기 로컬 DataStore에 둔다 |
+| 업로드 영상 재생 URI | 언급 없음 | **Firestore에 저장하지 않는다.** `content://` URI와 persistable 권한은 그 기기의 그 설치본에만 유효하다. `videoPlanId → 로컬 URI` 매핑은 기기 로컬 DataStore에 둔다. **(v0.6.6 개정)** 사진 선택기·공유로 받은 URI는 앱이 다시 시작되면 열리지 않으므로, 저장할 때 영상을 앱 전용 저장소(`filesDir/videos`)로 복사하고 그 파일 URI를 매핑에 넣는다. 열 수 없는 예전 매핑은 세션 준비 화면에서 "영상 다시 연결"로 복구한다 |
 | `DailySpeechLog.dailyTargetSec` | 필드 존재 | **그날의 목표를 스냅샷으로 고정.** `settings`에서만 읽으면 4.7절 적응 로직이 예산을 바꾼 순간 과거 완료율이 소급 오염되고, 그 완료율을 다시 입력으로 쓰므로 되먹임이 깨진다 |
 | 9.1절 "기본 Last-Write-Wins로 충분" | 전역 적용 | **누적 카운터는 예외.** `achievedSec` 같은 값에 LWW를 적용하면 두 태블릿이 오프라인에서 각각 누적한 발화 시간 중 한쪽이 통째로 사라진다. `FieldValue.increment()`를 쓴다 (FIRESTORE_SCHEMA.md §2) |
 
