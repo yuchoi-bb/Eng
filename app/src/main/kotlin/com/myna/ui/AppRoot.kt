@@ -435,5 +435,5 @@ private fun updateStatusText(lastCheckedEpochMs: Long?, outcome: String?): Strin
         }
     }
     val last = listOfNotNull(checked, outcome).joinToString(" · ").ifEmpty { "아직 확인하지 않았습니다" }
-    return "앱을 켤 때마다 새 버전을 확인하고, 와이파이면 알아서 받아 설치합니다.\n$last"
+    return "앱을 켤 때마다 새 버전을 확인하고, 있으면 알아서 받아 설치합니다.\n$last"
 }

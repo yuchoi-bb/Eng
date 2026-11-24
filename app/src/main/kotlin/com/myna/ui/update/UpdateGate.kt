@@ -2,7 +2,6 @@ package com.myna.ui.update
 
 import android.content.Context
 import android.content.Intent
-import android.net.ConnectivityManager
 import android.net.Uri
 import android.os.Build
 import android.widget.Toast
@@ -40,8 +39,6 @@ import java.io.File
 private sealed interface Phase {
     data object Idle : Phase
 
-    /** 데이터 요금이 붙는 회선이라 받기 전에 묻는다. */
-    data object AskMetered : Phase
     data class Downloading(val percent: Int?) : Phase
 
     /** 다 받았다. 연습 중이면 끝날 때까지 기다렸다가 설치한다. */
@@ -64,9 +61,9 @@ private sealed interface Phase {
  * 사이드로드 배포라 Play Store가 대신 해 주지 않는다. 예전에는 "받아서 설치"를 눌러야 했는데,
  * 그러면 업데이트가 밀린다.
  *
- * - 와이파이: 묻지 않고 받고, 받는 대로 설치한다. 이 앱이 스스로를 한 번 설치한 뒤로는
- *   안드로이드 12부터 확인 화면도 없다([ApkInstaller.install]).
- * - 데이터 요금이 붙는 회선: 먼저 묻는다 — 로밍 중에 10MB를 말없이 받으면 안 된다.
+ * - 회선 종류를 가리지 않는다. 와이파이든 모바일 데이터든 묻지 않고 받고, 받는 대로 설치한다
+ *   (사용자 결정). 이 앱이 스스로를 한 번 설치한 뒤로는 안드로이드 12부터 확인 화면도 없다
+ *   ([ApkInstaller.install]).
  * - 연습 중: 받아만 두고 설치는 세션을 나간 뒤에 한다. 설치하면 앱이 닫히기 때문이다.
  *
  * **확인이 실패해도 화면을 막지 않는다.** 이유는 설정 화면에 남긴다.
@@ -200,15 +197,11 @@ internal fun UpdateGate(
         }
     }
 
-    // 새 버전을 찾았으면 받는다. 요금이 붙는 회선이면 먼저 묻는다.
+    // 새 버전을 찾았으면 묻지 않고 받는다. 회선 종류는 보지 않는다.
     LaunchedEffect(update, attempt) {
         val pending = update ?: return@LaunchedEffect
         if (phase != Phase.Idle) return@LaunchedEffect
-        if (UpdatePolicy.downloadsWithoutAsking(isMetered(context))) {
-            startDownload(pending)
-        } else {
-            phase = Phase.AskMetered
-        }
+        startDownload(pending)
     }
 
     // 다 받았으면 설치한다. 연습 중이면 나갈 때까지 기다린다 — 설치하면 앱이 닫힌다.
@@ -219,23 +212,6 @@ internal fun UpdateGate(
 
     val pending = update ?: return
     when (val current = phase) {
-        Phase.AskMetered -> AlertDialog(
-            onDismissRequest = { phase = Phase.Postponed },
-            title = { Text("새 버전 v${pending.version}") },
-            text = {
-                Text(
-                    "지금은 모바일 데이터입니다. ${sizeText(pending.sizeBytes)}를 받아서 설치할까요?\n" +
-                        "와이파이에 연결되면 다음에 앱을 켤 때 자동으로 받습니다.",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { startDownload(pending) }) { Text("지금 받기") }
-            },
-            dismissButton = {
-                TextButton(onClick = { phase = Phase.Postponed }) { Text("와이파이에서") }
-            },
-        )
-
         is Phase.NeedsPermission -> AlertDialog(
             onDismissRequest = { phase = Phase.Postponed },
             title = { Text("새 버전 v${pending.version} 설치") },
@@ -278,13 +254,6 @@ internal fun UpdateGate(
 
 private fun canInstall(context: Context): Boolean =
     Build.VERSION.SDK_INT < Build.VERSION_CODES.O || context.packageManager.canRequestPackageInstalls()
-
-/** 데이터 요금이 붙는 회선인가. 모르면 붙는다고 본다 — 말없이 받는 쪽이 더 위험하다. */
-private fun isMetered(context: Context): Boolean {
-    val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-        ?: return true
-    return manager.isActiveNetworkMetered
-}
 
 private fun outcomeText(result: CheckResult): String = when (result) {
     is CheckResult.Available -> "v${result.update.version}이 나와 설치를 준비합니다"
