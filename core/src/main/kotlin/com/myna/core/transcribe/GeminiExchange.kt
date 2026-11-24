@@ -136,7 +136,7 @@ public object GeminiExchange {
             ?.get("message")?.jsonPrimitive?.content
     }.getOrNull()
 
-    private fun extractJsonText(responseBody: String): String? = runCatching {
+    internal fun extractJsonText(responseBody: String): String? = runCatching {
         json.parseToJsonElement(responseBody).jsonObject["candidates"]
             ?.jsonArray?.firstOrNull()?.jsonObject
             ?.get("content")?.jsonObject

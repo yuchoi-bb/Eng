@@ -33,10 +33,23 @@ public data class Sentence(
     val keywords: List<String>,
     val transliterationKo: String? = null,
     val breathGroups: List<BreathGroup> = emptyList(),
+    /**
+     * 단어마다 언제 말하는가. 스크립트 화면에서 소리에 맞춰 글자를 칠하는 데 쓴다.
+     * 비어 있으면 문장 길이 안에서 글자 수에 비례해 맞춘다([com.myna.core.playback.WordTimeline]).
+     */
+    val words: List<WordTiming> = emptyList(),
 ) {
     /** 이 문장의 발화 길이. 구간 반복과 발화 시간 집계의 기준. */
     val durationMs: Int get() = endMs - startMs
 }
+
+/** 단어 하나의 발화 구간. 영상 시작부터의 밀리초. */
+@Serializable
+public data class WordTiming(
+    val text: String,
+    val startMs: Int,
+    val endMs: Int,
+)
 
 @Serializable
 public data class BreathGroup(

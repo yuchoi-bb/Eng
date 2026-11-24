@@ -2,6 +2,7 @@ package com.myna.media
 
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import com.myna.core.playback.PlaybackSegment
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.PlayerConstants
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.YouTubePlayer
@@ -50,6 +51,17 @@ internal class YouTubeSourcePlayback(
     /** 재생 요청마다 오른다. 지난 요청의 감시가 새 요청을 건드리지 않게 한다. */
     private var request = 0
 
+    /** 플레이어가 마지막으로 알린 위치와 그때의 시각. 사이는 경과 시간으로 메운다(알림은 0.1초 간격). */
+    private var lastSecond = 0f
+    private var lastSecondAt = 0L
+    private var rate = 1f
+
+    /** 영상을 한 번이라도 불러왔는가. 불러온 뒤에는 건너뛰기로 충분하다. */
+    private var loaded = false
+
+    /** 건너뛴 직후 잠깐은 예전 위치 알림이 늦게 올 수 있다. 그동안 구간 끝 판정을 하지 않는다. */
+    private var ignoreEndUntil = 0L
+
     init {
         view.enableAutomaticInitialization = false
         view.initialize(
@@ -72,6 +84,7 @@ internal class YouTubeSourcePlayback(
                     state: PlayerConstants.PlayerState,
                 ) {
                     this@YouTubeSourcePlayback.state = state
+                    if (state == PlayerConstants.PlayerState.PLAYING) lastSecondAt = SystemClock.uptimeMillis()
                 }
 
                 override fun onError(
@@ -85,8 +98,10 @@ internal class YouTubeSourcePlayback(
                 }
 
                 override fun onCurrentSecond(youTubePlayer: YouTubePlayer, second: Float) {
+                    lastSecond = second
+                    lastSecondAt = SystemClock.uptimeMillis()
                     val target = endSeconds
-                    if (target > NO_TARGET && second >= target) {
+                    if (target > NO_TARGET && second >= target && SystemClock.uptimeMillis() >= ignoreEndUntil) {
                         endSeconds = NO_TARGET
                         youTubePlayer.pause()
                         onSegmentFinished?.invoke()
@@ -108,14 +123,53 @@ internal class YouTubeSourcePlayback(
 
         val start = segment.startMs / 1000f
         val token = ++request
+        markPosition(start, speed)
         val action: (YouTubePlayer) -> Unit = { youTubePlayer ->
             youTubePlayer.setPlaybackRate(playbackRateFor(speed))
             youTubePlayer.loadVideo(videoId, start)
+            loaded = true
             watch(token, start)
         }
 
         val ready = player
         if (ready == null) pendingPlay = action else action(ready)
+    }
+
+    override fun playFrom(segment: PlaybackSegment, speed: Float, onFinished: () -> Unit) {
+        val ready = player
+        if (ready == null || !loaded) {
+            playSegment(segment, speed, onFinished)
+            return
+        }
+        onSegmentFinished = onFinished
+        endSeconds = segment.endMs / 1000f
+        val start = segment.startMs / 1000f
+        val token = ++request
+        markPosition(start, speed)
+        ignoreEndUntil = SystemClock.uptimeMillis() + SEEK_SETTLE_MS
+        ready.setPlaybackRate(playbackRateFor(speed))
+        // 멈춘 상태에서 건너뛰면 멈춘 채로 남는다. 바로 재생도 건다.
+        ready.seekTo(start)
+        ready.play()
+        watch(token, start)
+    }
+
+    private fun markPosition(startSeconds: Float, speed: Float) {
+        lastSecond = startSeconds
+        lastSecondAt = SystemClock.uptimeMillis()
+        rate = speed
+    }
+
+    override fun currentPositionMs(): Long? {
+        if (player == null) return null
+        val base = lastSecond * 1000
+        // 재생 중이면 마지막 알림 뒤로 흐른 시간만큼 더한다. 알림 간격(0.1초)만큼 글자가 끊겨 칠해지지 않게.
+        val drift = if (state == PlayerConstants.PlayerState.PLAYING) {
+            ((SystemClock.uptimeMillis() - lastSecondAt).coerceIn(0, MAX_DRIFT_MS) * rate)
+        } else {
+            0f
+        }
+        return (base + drift).toLong()
     }
 
     /**
@@ -218,5 +272,7 @@ internal class YouTubeSourcePlayback(
         const val RETRY_AFTER_MS = 5_000L
         const val GIVE_UP_AFTER_MS = 9_000L
         const val GIVE_UP_BUFFERING_AFTER_MS = 20_000L
+        const val SEEK_SETTLE_MS = 400L
+        const val MAX_DRIFT_MS = 400L
     }
 }

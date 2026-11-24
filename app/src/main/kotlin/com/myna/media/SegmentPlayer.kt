@@ -36,6 +36,9 @@ internal class SegmentPlayer(
 
     private var onSegmentFinished: (() -> Unit)? = null
 
+    /** 지금 걸린 구간의 시작. 클리핑을 걸면 플레이어 위치가 이 지점부터 0으로 센다. */
+    private var clipStartMs: Long = 0
+
     init {
         player.addListener(
             object : Player.Listener {
@@ -70,6 +73,7 @@ internal class SegmentPlayer(
     override fun playSegment(segment: PlaybackSegment, speed: Float, onFinished: () -> Unit) {
         val uri = mediaUri ?: return
         onSegmentFinished = onFinished
+        clipStartMs = segment.startMs.toLong()
         player.setMediaItem(
             MediaItem.Builder()
                 .setUri(uri)
@@ -89,11 +93,15 @@ internal class SegmentPlayer(
     /** L1 A/B 비교 — 내 녹음은 속도 보정 없이 그대로 듣는다. */
     fun playRecording(uri: Uri, onFinished: () -> Unit) {
         onSegmentFinished = onFinished
+        clipStartMs = 0
         player.setMediaItem(MediaItem.fromUri(uri))
         player.setPlaybackSpeed(1.0f)
         player.prepare()
         player.playWhenReady = true
     }
+
+    override fun currentPositionMs(): Long? =
+        if (player.currentMediaItem == null) null else clipStartMs + player.currentPosition
 
     override fun pause() {
         player.playWhenReady = false

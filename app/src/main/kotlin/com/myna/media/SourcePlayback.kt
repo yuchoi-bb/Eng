@@ -11,6 +11,18 @@ import com.myna.core.playback.PlaybackSegment
  */
 internal interface SourcePlayback {
     fun playSegment(segment: PlaybackSegment, speed: Float, onFinished: () -> Unit)
+
+    /**
+     * 누르고 있는 동안 듣기용 — [segment]의 시작부터 곧바로 재생한다. 이미 불러온 영상이면
+     * 다시 불러오지 않고 그 자리로 건너뛴다. 떼었다 다시 누를 때마다 영상을 새로 불러오면
+     * 소리가 늦게 나온다.
+     */
+    fun playFrom(segment: PlaybackSegment, speed: Float, onFinished: () -> Unit) =
+        playSegment(segment, speed, onFinished)
+
+    /** 지금 재생 위치(영상 시작부터의 밀리초). 모르면 null. 글자를 소리에 맞춰 칠하는 데 쓴다. */
+    fun currentPositionMs(): Long? = null
+
     fun pause()
     fun release()
 }

@@ -186,4 +186,14 @@ class TranscriptValidatorTest {
         )
         assertEquals(listOf<Int?>(2, 0), assertIs<ValidationResult.Accepted>(result).sourceIndexes)
     }
+
+    @Test
+    fun `단어 시각을 이어받는다`() {
+        // 편집 화면이 저장된 단어 시각을 넘기면 그대로 남아야 한다.
+        val withWords = okSentence(0).copy(
+            words = listOf(RawWord("What", 0, 300), RawWord("are", 300, 500), RawWord(" ", 1, 2)),
+        )
+        val result = assertIs<ValidationResult.Accepted>(TranscriptValidator.validate(raw(sentences = listOf(withWords))))
+        assertEquals(listOf("What", "are"), result.transcript.sentences.single().words.map { it.text })
+    }
 }

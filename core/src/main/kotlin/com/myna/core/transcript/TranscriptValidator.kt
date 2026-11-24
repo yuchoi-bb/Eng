@@ -9,6 +9,8 @@ import com.myna.core.model.Transcript
 import com.myna.core.model.TranscriptWarning
 import com.myna.core.model.VideoSource
 import com.myna.core.model.VideoType
+import com.myna.core.model.WordTiming
+import com.myna.core.playback.WordTimeline
 
 /** 검증 결과. 거부되면 저장하지 않는다 — TRANSCRIPTION_SCHEMA §4.1. */
 public sealed interface ValidationResult {
@@ -229,6 +231,12 @@ public object TranscriptValidator {
                 // 그룹 타임스탬프 합은 문장 범위를 벗어나지 않아야 한다 — §3.2.
                 BreathGroup(groupText, groupStart.coerceAtLeast(start), groupEnd.coerceAtMost(end))
             },
+            words = WordTimeline.sanitize(
+                raw.words.mapNotNull { word ->
+                    val wordText = word.text?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                    WordTiming(wordText.trim(), word.startMs ?: return@mapNotNull null, word.endMs ?: return@mapNotNull null)
+                },
+            ),
         )
     }
 

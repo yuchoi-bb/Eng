@@ -14,6 +14,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import com.myna.core.model.VideoPlan
 import com.myna.core.model.VideoSource
 import com.myna.core.notes.FieldNote
 import com.myna.core.offline.OfflineReadiness
@@ -34,6 +35,7 @@ import com.myna.ui.notes.CaptureNoteScreen
 import com.myna.ui.notes.NoteListScreen
 import com.myna.ui.notes.ResolveNoteScreen
 import com.myna.ui.update.UpdateGate
+import com.myna.transcribe.AlignResult
 import com.myna.transcribe.TranscribeResult
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.collectAsState as collectFlowAsState
@@ -83,6 +85,30 @@ internal fun AppRoot(
     var importingVideo by remember { mutableStateOf(false) }
     // 영상을 다시 연결하면 오른다 — "이 기기에서 열 수 있는가"를 다시 본다.
     var videoRevision by remember { mutableStateOf(0) }
+    // 스크립트 화면의 단어 시각 받기. 화면을 나가도 끝까지 받아 저장하도록 여기서 돌린다.
+    var aligningPlanId by remember { mutableStateOf<String?>(null) }
+    var alignStatus by remember { mutableStateOf<Pair<String, String>?>(null) }
+
+    fun alignWords(plan: VideoPlan) {
+        if (aligningPlanId != null) return
+        val planId = plan.id.value
+        val localVideo = repository.localMediaUri(planId)?.let(Uri::parse)
+        val requested = plan.sentences.associate { it.index to it.text }
+        aligningPlanId = planId
+        alignStatus = null
+        scope.launch {
+            val result = transcriber.alignWords(context, plan, localVideo) { alignStatus = planId to it }
+            alignStatus = planId to when (result) {
+                is AlignResult.Success -> {
+                    repository.setWordTimings(planId, result.words, requested)
+                    "단어 시각을 받았습니다 (${result.words.size}/${plan.sentences.size}문장). 🎧를 꾹 눌러 보세요."
+                }
+                is AlignResult.Failed -> "단어 시각을 받지 못했습니다: ${result.message}"
+                AlignResult.NoApiKey -> "단어 시각을 받으려면 설정에서 Gemini API 키를 넣어 주세요."
+            }
+            aligningPlanId = null
+        }
+    }
     val online by networkMonitor.observe().collectFlowAsState(initial = networkMonitor.isOnline())
 
     var screen: Screen by remember {
@@ -215,9 +241,27 @@ internal fun AppRoot(
             if (plan == null) {
                 LaunchedEffect(current.planId) { screen = Screen.Home }
             } else {
+                val source = plan.transcript.source
+                val youTubeId = plan.transcript.sourceRef.takeIf { source == VideoSource.YOUTUBE }
+                val localVideo = repository.localMediaUri(current.planId)
+                    ?.takeIf { source == VideoSource.UPLOAD }
+                    ?.let(Uri::parse)
+                val hasKey = remember(keyRevision) { apiKeys.hasKey }
+                val canAlign = hasKey && online && (youTubeId != null || localVideo != null)
+                // 단어 시각이 없는 문장이 있으면 화면을 열 때 한 번 알아서 받는다. 이미 저장한 영상도 이렇게 채워진다.
+                LaunchedEffect(current.planId) {
+                    if (canAlign && plan.sentences.any { it.words.isEmpty() }) alignWords(plan)
+                }
                 ScriptScreen(
                     plan = plan,
                     showTransliteration = state.settings.showTransliterationKo,
+                    youTubeVideoId = youTubeId,
+                    videoUri = localVideo,
+                    playbackRate = state.settings.playbackRate,
+                    aligning = aligningPlanId == current.planId,
+                    alignStatus = alignStatus?.takeIf { it.first == current.planId }?.second,
+                    canAlign = canAlign,
+                    onAlign = { alignWords(plan) },
                     onBack = { screen = Screen.SessionSetup(current.planId) },
                 )
             }

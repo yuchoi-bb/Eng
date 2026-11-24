@@ -6,6 +6,7 @@ import com.myna.core.model.UserSettings
 import com.myna.core.model.PlanPosition
 import com.myna.core.model.SentenceId
 import com.myna.core.model.VideoPlan
+import com.myna.core.model.WordTiming
 import com.myna.core.notes.FieldNote
 import com.myna.core.notes.NoteSituation
 import com.myna.core.notes.NotePractice
@@ -175,6 +176,22 @@ public class ShadowingRepository(private val store: LocalStore) {
         mutate { current ->
             val plan = current.plans[planId] ?: return@mutate current
             current.copy(plans = current.plans + (planId to plan.copy(resumeAt = position)))
+        }
+    }
+
+    /**
+     * 받은 단어 시각을 문장에 붙인다. 받는 사이에 문장을 고쳤을 수 있으므로 요청할 때의 문장과
+     * 글이 같은 문장에만 붙인다.
+     */
+    public fun setWordTimings(planId: String, words: Map<Int, List<WordTiming>>, requestedTexts: Map<Int, String>) {
+        mutate { current ->
+            val plan = current.plans[planId] ?: return@mutate current
+            val sentences = plan.transcript.sentences.map { sentence ->
+                val timing = words[sentence.index]
+                if (timing != null && requestedTexts[sentence.index] == sentence.text) sentence.copy(words = timing) else sentence
+            }
+            val updated = plan.copy(transcript = plan.transcript.copy(sentences = sentences))
+            current.copy(plans = current.plans + (planId to updated))
         }
     }
 

@@ -52,6 +52,7 @@ import com.myna.core.transcript.RawBreathGroup
 import com.myna.core.transcript.RawExpression
 import com.myna.core.transcript.RawSentence
 import com.myna.core.transcript.RawTranscript
+import com.myna.core.transcript.RawWord
 import com.myna.core.transcript.TranscriptValidator
 import com.myna.core.transcript.ValidationResult
 import com.myna.media.LocalVideos
@@ -626,6 +627,12 @@ private fun buildTranscript(
             keywords = origin?.keywords.orEmpty(),
             breathGroups = if (sameText) {
                 origin?.breathGroups.orEmpty().map { RawBreathGroup(it.text, it.startMs, it.endMs) }
+            } else {
+                emptyList()
+            },
+            // 단어 시각도 문장 글이 그대로일 때만 이어받는다. 시작·끝만 옮겼다면 단어는 제자리다.
+            words = if (sameText) {
+                origin?.words.orEmpty().map { RawWord(it.text, it.startMs, it.endMs) }
             } else {
                 emptyList()
             },

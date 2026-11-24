@@ -35,6 +35,15 @@ public data class RawSentence(
     val endMs: Int? = null,
     val keywords: List<String> = emptyList(),
     val breathGroups: List<RawBreathGroup> = emptyList(),
+    /** 단어별 시각. 전사 응답에는 없고, 편집 화면이 저장된 값을 이어받을 때 쓴다. */
+    val words: List<RawWord> = emptyList(),
+)
+
+@Serializable
+public data class RawWord(
+    val text: String? = null,
+    val startMs: Int? = null,
+    val endMs: Int? = null,
 )
 
 @Serializable

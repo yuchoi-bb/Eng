@@ -6,12 +6,15 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Log
 import com.myna.core.transcribe.GeminiErrorKind
+import com.myna.core.model.VideoPlan
 import com.myna.core.model.VideoSource
+import com.myna.core.model.WordTiming
 import com.myna.core.transcribe.GeminiExchange
 import com.myna.core.transcribe.GeminiFile
 import com.myna.core.transcribe.GeminiFiles
 import com.myna.core.transcribe.GeminiModel
 import com.myna.core.transcribe.TranscriptionPrompt
+import com.myna.core.transcribe.WordAlignment
 import com.myna.core.transcript.RawTranscript
 import com.myna.core.transcript.RejectionReason
 import com.myna.core.transcript.TranscriptValidator
@@ -26,6 +29,13 @@ import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.UUID
+
+/** 단어 시각 맞추기 결과. 성공이면 문장 번호 → 단어 시각. */
+internal sealed interface AlignResult {
+    data class Success(val words: Map<Int, List<WordTiming>>) : AlignResult
+    data class Failed(val message: String) : AlignResult
+    data object NoApiKey : AlignResult
+}
 
 /** 전사 결과. 실패도 값으로 돌려준다 — 사용자에게 무엇이 잘못됐는지 말해 줘야 한다. */
 internal sealed interface TranscribeResult {
@@ -92,41 +102,11 @@ internal class GeminiTranscriber(private val keys: ApiKeyStore) {
         onProgress: (String) -> Unit,
     ): TranscribeResult = withContext(Dispatchers.IO) {
         val key = keys.geminiKey ?: return@withContext TranscribeResult.NoApiKey
-        val resolver = context.contentResolver
-        val mimeType = resolver.getType(videoUri)?.takeIf { it.startsWith("video/") } ?: "video/mp4"
-
-        // 크기를 알아야 올릴 수 있다. 모르면 캐시에 한 번 복사해 잰다.
-        var tempCopy: File? = null
-        val size = querySize(resolver, videoUri) ?: run {
-            val copy = File(context.cacheDir, "upload-${UUID.randomUUID()}")
-            val copied = runCatching {
-                resolver.openInputStream(videoUri)?.use { input -> copy.outputStream().use { input.copyTo(it) } }
-            }.getOrNull()
-            if (copied == null) return@withContext TranscribeResult.Failed("영상을 읽지 못했습니다.")
-            tempCopy = copy
-            copy.length()
+        val ready = when (val prepared = prepareUpload(context, key, videoUri, onProgress)) {
+            is Prepared.Failed -> return@withContext TranscribeResult.Failed(prepared.message)
+            is Prepared.Ready -> prepared
         }
-        if (size > GeminiFiles.MAX_UPLOAD_BYTES) {
-            tempCopy?.delete()
-            return@withContext TranscribeResult.Failed(
-                "영상이 너무 큽니다 (${size / MB}MB). ${GeminiFiles.MAX_UPLOAD_BYTES / MB}MB 이하만 분석할 수 있습니다.",
-            )
-        }
-
-        val copy = tempCopy
-        val open = { copy?.inputStream() ?: resolver.openInputStream(videoUri) }
-        val result = runCatching {
-            upload(key, size, mimeType, open) { percent -> onProgress("영상을 올리는 중… $percent%") }
-        }
-        copy?.delete()
-        val uploaded = result.getOrNull()
-            ?: return@withContext TranscribeResult.Failed("영상을 올리지 못했습니다. 연결을 확인해 주세요.")
-
         try {
-            onProgress("영상을 준비하는 중…")
-            val ready = waitUntilActive(key, uploaded)
-                ?: return@withContext TranscribeResult.Failed("Gemini가 영상을 처리하지 못했습니다.")
-
             onProgress("영상을 보고 들으며 받아 적는 중…")
             // 이 영상의 계획 ID가 된다(UP_…). 기기 영상은 고유 번호가 없으므로 여기서 만든다.
             val sourceRef = UUID.randomUUID().toString()
@@ -136,14 +116,13 @@ internal class GeminiTranscriber(private val keys: ApiKeyStore) {
                     "영상을 받아 줄 모델을 찾지 못했습니다. 설정에서 모델 이름을 직접 넣어 보세요.",
                 )
             }
-            val fileMime = ready.mimeType ?: mimeType
             for (model in candidates) {
                 val outcome = attempt(
                     model = model,
                     key = key,
                     bodies = listOf(
-                        GeminiExchange.requestForUploadedVideo(ready.uri, fileMime),
-                        GeminiExchange.requestForUploadedVideo(ready.uri, fileMime, retry = true),
+                        GeminiExchange.requestForUploadedVideo(ready.file.uri, ready.mimeType),
+                        GeminiExchange.requestForUploadedVideo(ready.file.uri, ready.mimeType, retry = true),
                     ),
                     parse = { GeminiExchange.parseTranscript(it, VideoSource.UPLOAD, sourceRef) },
                     rememberModel = false,
@@ -155,9 +134,154 @@ internal class GeminiTranscriber(private val keys: ApiKeyStore) {
             }
             TranscribeResult.Failed("시도한 모델이 모두 영상 파일을 받지 않았습니다. 설정에서 모델 이름을 직접 넣어 보세요.")
         } finally {
-            // 48시간 뒤 스스로 지워지지만, 다 쓴 영상을 남겨 둘 이유가 없다.
-            runCatching { connect("$BASE/${uploaded.name}", key, "DELETE").use { it.responseCode } }
+            deleteUploaded(key, ready.file)
         }
+    }
+
+    /**
+     * 저장된 영상의 문장에 단어별 시각을 붙인다 (TRANSCRIPTION_SCHEMA §4.6).
+     *
+     * 다시 받아 적지 않는다 — 지금 문장(사용자가 지우고 고친 그대로)을 보내고 각 단어가 언제
+     * 말해지는지만 받는다. 유튜브는 URL로, 기기 영상은 앱에 저장해 둔 파일을 올려서.
+     *
+     * @param localVideo 기기 영상일 때 앱에 저장해 둔 파일. 유튜브면 null.
+     */
+    suspend fun alignWords(
+        context: Context,
+        plan: VideoPlan,
+        localVideo: Uri?,
+        onProgress: (String) -> Unit,
+    ): AlignResult = withContext(Dispatchers.IO) {
+        val key = keys.geminiKey ?: return@withContext AlignResult.NoApiKey
+        val sentences = plan.sentences
+        if (sentences.isEmpty()) return@withContext AlignResult.Failed("문장이 없습니다.")
+
+        when (plan.transcript.source) {
+            VideoSource.YOUTUBE -> {
+                onProgress("영상을 들으며 단어 시각을 맞추는 중…")
+                val videoId = plan.transcript.sourceRef
+                runOnModels(
+                    candidates = modelCandidates(key),
+                    key = key,
+                    bodies = listOf(
+                        WordAlignment.requestForYouTube(videoId, sentences),
+                        WordAlignment.requestForYouTube(videoId, sentences, retry = true),
+                    ),
+                    parse = { WordAlignment.parse(it, sentences) },
+                )
+            }
+
+            VideoSource.UPLOAD -> {
+                val uri = localVideo ?: return@withContext AlignResult.Failed("이 기기에 영상이 없습니다.")
+                val ready = when (val prepared = prepareUpload(context, key, uri, onProgress)) {
+                    is Prepared.Failed -> return@withContext AlignResult.Failed(prepared.message)
+                    is Prepared.Ready -> prepared
+                }
+                try {
+                    onProgress("영상을 들으며 단어 시각을 맞추는 중…")
+                    runOnModels(
+                        candidates = fileModelCandidates(key),
+                        key = key,
+                        bodies = listOf(
+                            WordAlignment.requestForUploadedVideo(ready.file.uri, ready.mimeType, sentences),
+                            WordAlignment.requestForUploadedVideo(ready.file.uri, ready.mimeType, sentences, retry = true),
+                        ),
+                        parse = { WordAlignment.parse(it, sentences) },
+                    )
+                } finally {
+                    deleteUploaded(key, ready.file)
+                }
+            }
+
+            VideoSource.NOTE -> AlignResult.Failed("현장 메모 문장에는 영상이 없습니다.")
+        }
+    }
+
+    /** 후보 모델을 차례로 눌러 단어 시각을 받는다. 파싱 실패는 temperature를 낮춰 한 번 더. */
+    private fun runOnModels(
+        candidates: List<String>,
+        key: String,
+        bodies: List<JsonObject>,
+        parse: (String) -> Map<Int, List<WordTiming>>?,
+    ): AlignResult {
+        if (candidates.isEmpty()) return AlignResult.Failed("영상을 받아 줄 모델을 찾지 못했습니다.")
+        for (model in candidates) {
+            for (body in bodies) {
+                val response = post("$BASE/models/$model:generateContent", key, body)
+                    ?: return AlignResult.Failed("네트워크에 닿지 못했습니다.")
+                val error = GeminiExchange.errorMessage(response)
+                if (error != null) {
+                    when (GeminiModel.classifyError(error)) {
+                        GeminiErrorKind.MODEL_CAPABILITY -> break // 다음 모델
+                        GeminiErrorKind.AUTH -> return AlignResult.Failed("API 키를 확인해 주세요. ($error)")
+                        GeminiErrorKind.QUOTA -> return AlignResult.Failed("사용 한도를 넘었습니다. 잠시 뒤 다시 시도해 주세요.")
+                        GeminiErrorKind.OTHER -> return AlignResult.Failed(error)
+                    }
+                }
+                val parsed = parse(response)
+                if (!parsed.isNullOrEmpty()) return AlignResult.Success(parsed)
+                Log.w(TAG, "$model 단어 시각 응답을 읽지 못했습니다")
+            }
+        }
+        return AlignResult.Failed("단어 시각을 받지 못했습니다.")
+    }
+
+    private sealed interface Prepared {
+        data class Ready(val file: GeminiFile, val mimeType: String) : Prepared
+        data class Failed(val message: String) : Prepared
+    }
+
+    /** 기기 영상을 Files API로 올리고 처리가 끝나기를 기다린다. 다 쓰면 [deleteUploaded]. */
+    private suspend fun prepareUpload(
+        context: Context,
+        key: String,
+        videoUri: Uri,
+        onProgress: (String) -> Unit,
+    ): Prepared {
+        val resolver = context.contentResolver
+        val mimeType = resolver.getType(videoUri)?.takeIf { it.startsWith("video/") } ?: "video/mp4"
+
+        // 크기를 알아야 올릴 수 있다. 모르면 캐시에 한 번 복사해 잰다.
+        var tempCopy: File? = null
+        val size = querySize(resolver, videoUri)
+            ?: videoUri.path?.takeIf { videoUri.scheme == "file" }?.let { File(it).length() }?.takeIf { it > 0 }
+            ?: run {
+                val copy = File(context.cacheDir, "upload-${UUID.randomUUID()}")
+                val copied = runCatching {
+                    resolver.openInputStream(videoUri)?.use { input -> copy.outputStream().use { input.copyTo(it) } }
+                }.getOrNull()
+                if (copied == null) return Prepared.Failed("영상을 읽지 못했습니다.")
+                tempCopy = copy
+                copy.length()
+            }
+        if (size > GeminiFiles.MAX_UPLOAD_BYTES) {
+            tempCopy?.delete()
+            return Prepared.Failed(
+                "영상이 너무 큽니다 (${size / MB}MB). ${GeminiFiles.MAX_UPLOAD_BYTES / MB}MB 이하만 분석할 수 있습니다.",
+            )
+        }
+
+        val copy = tempCopy
+        val open = { copy?.inputStream() ?: resolver.openInputStream(videoUri) }
+        val result = runCatching {
+            upload(key, size, mimeType, open) { percent -> onProgress("영상을 올리는 중… $percent%") }
+        }
+        copy?.delete()
+        val uploaded = result.getOrNull()
+            ?: return Prepared.Failed("영상을 올리지 못했습니다. 연결을 확인해 주세요.")
+
+        onProgress("영상을 준비하는 중…")
+        val ready = waitUntilActive(key, uploaded)
+        if (ready == null) {
+            deleteUploaded(key, uploaded)
+            return Prepared.Failed("Gemini가 영상을 처리하지 못했습니다.")
+        }
+        return Prepared.Ready(ready, ready.mimeType ?: mimeType)
+    }
+
+    /** 48시간 뒤 스스로 지워지지만, 다 쓴 영상을 남겨 둘 이유가 없다. */
+    private fun deleteUploaded(key: String, file: GeminiFile) {
+        runCatching { connect("$BASE/${file.name}", key, "DELETE").use { it.responseCode } }
     }
 
     private fun querySize(resolver: ContentResolver, uri: Uri): Long? = runCatching {
