@@ -25,6 +25,7 @@ import com.myna.transcribe.GeminiTranscriber
 import com.myna.ui.settings.ApiKeyScreen
 import com.myna.ui.entry.ManualEntryScreen
 import com.myna.ui.home.HomeScreen
+import com.myna.ui.script.ScriptScreen
 import com.myna.ui.onboarding.OnboardingScreen
 import com.myna.ui.session.SessionScreen
 import com.myna.ui.session.SessionSetupScreen
@@ -47,6 +48,8 @@ internal sealed interface Screen {
     data object Home : Screen
     data class ManualEntry(val videoUri: Uri?, val youTubeVideoId: String? = null) : Screen
     data class SessionSetup(val planId: String) : Screen
+    /** 영상의 전체 스크립트(영어·한글 뜻). */
+    data class Script(val planId: String) : Screen
     /** 저장된 영상의 문장을 고친다 — 필요 없는 문장 지우기, 시작·끝 맞추기. */
     data class EditPlan(val planId: String) : Screen
     /** @param resume 저장된 자리에서 이어서 한다. false면 처음부터. */
@@ -202,6 +205,20 @@ internal fun AppRoot(
                     },
                     onBack = { screen = Screen.Home },
                     onEditSentences = { screen = Screen.EditPlan(plan.id.value) },
+                    onOpenScript = { screen = Screen.Script(plan.id.value) },
+                )
+            }
+        }
+
+        is Screen.Script -> {
+            val plan = state.plans[current.planId]
+            if (plan == null) {
+                LaunchedEffect(current.planId) { screen = Screen.Home }
+            } else {
+                ScriptScreen(
+                    plan = plan,
+                    showTransliteration = state.settings.showTransliterationKo,
+                    onBack = { screen = Screen.SessionSetup(current.planId) },
                 )
             }
         }

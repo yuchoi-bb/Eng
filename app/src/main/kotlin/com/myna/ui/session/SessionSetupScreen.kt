@@ -58,6 +58,8 @@ internal fun SessionSetupScreen(
     /** 필요 없는 문장을 지우고 시작·끝을 맞춘다. 영상이 있는 계획에서만. */
     onEditSentences: () -> Unit,
     /** 기기 영상을 이 기기에서 열 수 없다. 같은 영상을 다시 골라 연결해야 한다. */
+    /** 영상 전체 스크립트를 본다. */
+    onOpenScript: () -> Unit = {},
     videoMissing: Boolean = false,
     relinkingVideo: Boolean = false,
     onRelinkVideo: (Uri) -> Unit = {},
@@ -92,6 +94,10 @@ internal fun SessionSetupScreen(
         Spacer(Modifier.height(16.dp))
         Text("문장 ${plan.sentences.size}개 · 발화 ${formatDuration(speechSec)}")
         Text("유형 ${plan.transcript.type}", style = MaterialTheme.typography.bodySmall)
+        // 연습 화면은 한 문장씩만 보여 준다. 시작 전에 영상 전체를 훑어볼 수 있게 한다.
+        OutlinedButton(onClick = onOpenScript, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+            Text("전체 스크립트 보기")
+        }
         if (videoMissing) {
             Spacer(Modifier.height(12.dp))
             Text(
