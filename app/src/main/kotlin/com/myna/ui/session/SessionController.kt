@@ -1,6 +1,9 @@
 package com.myna.ui.session
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
@@ -44,6 +47,9 @@ internal data class SessionUiState(
     val playsSource: Boolean = true,
     /** 재생을 요청했는데 시작되지 않았을 때의 안내. */
     val stallNotice: String? = null,
+    /** 손대지 않는 모드에서 따라 말할 시간이 얼마나 남았나(ms). 기다리는 중이 아니면 null. */
+    val followRemainingMs: Long? = null,
+    val followTotalMs: Long = 0,
     /** 이번 걸음의 몇 번째 단계인가, 모두 몇 단계인가. 회차와 외운 문장 여부에 따라 1~3이다. */
     val stageNumber: Int = 1,
     val stageCount: Int = 3,
@@ -86,6 +92,12 @@ internal class SessionController(
 ) {
     private val recorder = SentenceRecorder(context)
     private val recordingPlayer = RecordingPlayer()
+
+    /** 손대지 않는 모드의 기다림 타이머. 새로 기다릴 때마다 [followToken]이 올라 예전 타이머는 스스로 멈춘다. */
+    private val handler = Handler(Looper.getMainLooper())
+    private var followToken = 0
+    private var followDeadline = 0L
+    private var followTotalMs = 0L
     private val engine = SessionEngine(
         plan = plan,
         options = options,
@@ -221,10 +233,38 @@ internal class SessionController(
         if (engine.requiresRecording) startRecording(sentenceIndex) else waitForUser()
     }
 
-    /** 녹음이 없는 단계에서 "말하기 끝" 버튼을 띄운다. */
+    /**
+     * 녹음이 없는 단계에서 "말하기 끝" 버튼을 띄운다.
+     *
+     * 손대지 않는 모드면 누를 사람이 없다. 들려준 길이만큼 기다렸다가 저절로 넘어간다.
+     */
     private fun waitForUser() {
         isRecording = true
+        if (options.handsFree) startFollowTimer()
         _uiState.value = snapshot()
+    }
+
+    private fun startFollowTimer() {
+        val step = engine.currentStep ?: return
+        val sentence = plan.sentences.getOrNull(step.sentenceIndex) ?: return
+        val pause = options.followPauseMs(segmentFor(step.unit, sentence).durationMs, playbackRate)
+        val token = ++followToken
+        followTotalMs = pause
+        followDeadline = SystemClock.uptimeMillis() + pause
+        handler.post { followTick(token) }
+    }
+
+    private fun followTick(token: Int) {
+        // 그사이 다시 듣기·다음 문장·직접 넘기기로 기다림이 끝났으면 멈춘다.
+        if (token != followToken || !isRecording) return
+        val remaining = followDeadline - SystemClock.uptimeMillis()
+        if (remaining <= 0) {
+            followToken += 1
+            finishRecording()
+            return
+        }
+        _uiState.value = snapshot()
+        handler.postDelayed({ followTick(token) }, FOLLOW_TICK_MS)
     }
 
     /** `type=SINGLE`의 호흡 조각은 문장 전체가 아니라 그 조각만 재생한다 — §4.4. */
@@ -382,6 +422,8 @@ internal class SessionController(
         recorder.latestRecording(SentenceId.of(plan.id, sentenceIndex).value)
 
     fun release() {
+        followToken += 1
+        handler.removeCallbacksAndMessages(null)
         recorder.stop()
         recordingPlayer.release()
         source?.release()
@@ -412,6 +454,12 @@ internal class SessionController(
             playbackNotice = playbackNotice,
             playsSource = playsSource,
             stallNotice = stallNotice,
+            followRemainingMs = if (options.handsFree && isRecording) {
+                (followDeadline - SystemClock.uptimeMillis()).coerceAtLeast(0)
+            } else {
+                null
+            },
+            followTotalMs = followTotalMs,
             stageNumber = engine.stageNumber,
             stageCount = engine.stagesPerCount,
             memorized = engine.isCurrentSentenceMemorized,
@@ -421,3 +469,6 @@ internal class SessionController(
         )
     }
 }
+
+/** 남은 시간 표시를 갱신하는 간격. */
+private const val FOLLOW_TICK_MS = 200L

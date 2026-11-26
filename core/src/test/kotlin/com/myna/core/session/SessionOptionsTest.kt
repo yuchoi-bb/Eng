@@ -78,4 +78,34 @@ class SessionOptionsTest {
         while (!engine.isFinished) engine.completeStage()
         assertEquals(2, engine.completedCounts)
     }
+
+    // ---------- 손대지 않고 듣고 따라 하기 ----------
+
+    @Test
+    fun `손대지 않는 모드는 녹음하지 않는다`() {
+        val options = SessionOptions(handsFree = true)
+        assertFalse(options.recordsVoice)
+        assertTrue(options.stages.none { options.requiresRecording(it) })
+    }
+
+    @Test
+    fun `들려준 길이만큼 기다린다`() {
+        // 2초 문장을 0.75배로 들려주면 약 2.67초가 걸린다. 따라 말할 시간도 그만큼 + 시작 틈.
+        val options = SessionOptions(handsFree = true)
+        assertEquals(2666 + SessionOptions.FOLLOW_LEAD_MS, options.followPauseMs(2000, 0.75f))
+    }
+
+    @Test
+    fun `따라 말할 시간을 늘릴 수 있다`() {
+        val options = SessionOptions(handsFree = true, followFactor = 1.5f)
+        assertEquals(3000 + SessionOptions.FOLLOW_LEAD_MS, options.followPauseMs(2000, 1f))
+    }
+
+    @Test
+    fun `손대지 않는 모드에서도 한 걸음을 끝내면 1카운트다`() {
+        val engine = SessionEngine(plan(targetReps = 2), SessionOptions(handsFree = true))
+        engine.completeStep()
+        assertEquals(1, engine.completedCounts)
+        assertTrue(engine.achievedSec > 0)
+    }
 }

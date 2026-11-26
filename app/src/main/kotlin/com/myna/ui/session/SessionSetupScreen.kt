@@ -5,6 +5,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.ui.text.font.FontWeight
+import com.myna.ui.watch.WatchPlayer
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Row
@@ -60,6 +65,12 @@ internal fun SessionSetupScreen(
     /** 기기 영상을 이 기기에서 열 수 없다. 같은 영상을 다시 골라 연결해야 한다. */
     /** 영상 전체 스크립트를 본다. */
     onOpenScript: () -> Unit = {},
+    /** 영상을 그냥 보는 작은 재생기. 둘 다 null이면 보여 주지 않는다(현장 메모, 영상 없음). */
+    watchYouTubeId: String? = null,
+    watchVideoUri: Uri? = null,
+    watchStartMs: Long = 0,
+    onWatchPosition: (Long) -> Unit = {},
+    onFullScreen: () -> Unit = {},
     videoMissing: Boolean = false,
     relinkingVideo: Boolean = false,
     onRelinkVideo: (Uri) -> Unit = {},
@@ -72,6 +83,8 @@ internal fun SessionSetupScreen(
     // 계산값을 먼저 채워 두고, 사용자가 −/+나 직접 입력으로 고친다. 전에 직접 정한 값이 있으면 그 값.
     var repsText by remember { mutableStateOf((if (plan.autoReps) suggested else plan.targetReps).toString()) }
     var whisper by remember { mutableStateOf(false) }
+    var handsFree by remember { mutableStateOf(false) }
+    var followFactor by remember { mutableStateOf(1f) }
 
     // 현장 메모로 적은 문장은 원본 영상이 없다. 들려줄 것이 없는데 재생기를 기다리면
     // 세션이 시작되지 않는다.
@@ -90,6 +103,26 @@ internal fun SessionSetupScreen(
     // 이어서 하기 버튼과 수동 횟수 입력이 겹치면 작은 화면에서 넘친다. 스크롤을 둔다.
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) {
         Text("세션 준비", style = MaterialTheme.typography.headlineSmall)
+
+        // 연습 전에 영상을 그냥 볼 수 있게 한다. 전체 화면으로도 본다.
+        if (watchYouTubeId != null || watchVideoUri != null) {
+            Box(
+                Modifier.fillMaxWidth().height(WATCH_HEIGHT).padding(top = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                WatchPlayer(
+                    youTubeVideoId = watchYouTubeId,
+                    videoUri = watchVideoUri,
+                    startMs = watchStartMs,
+                    autoplay = false,
+                    onPosition = onWatchPosition,
+                    modifier = Modifier.fillMaxHeight().aspectRatio(9f / 16f, matchHeightConstraintsFirst = true),
+                )
+            }
+            OutlinedButton(onClick = onFullScreen, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
+                Text("⛶ 전체 화면으로 보기")
+            }
+        }
 
         Spacer(Modifier.height(16.dp))
         Text("문장 ${plan.sentences.size}개 · 발화 ${formatDuration(speechSec)}")
@@ -138,6 +171,36 @@ internal fun SessionSetupScreen(
                 )
             }
             Switch(checked = whisper, onCheckedChange = { whisper = it })
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("손대지 않고 듣고 따라 하기")
+                Text(
+                    "화면을 누르지 않아도 정한 횟수만큼 계속 들려줍니다. 문장이 끝나면 따라 말할 시간만큼 " +
+                        "기다렸다가 저절로 넘어갑니다. 녹음은 하지 않습니다.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Switch(checked = handsFree, onCheckedChange = { handsFree = it })
+        }
+        if (handsFree) {
+            Text("따라 말할 시간", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
+            Row(Modifier.fillMaxWidth()) {
+                FOLLOW_FACTORS.forEach { factor ->
+                    val selected = followFactor == factor
+                    OutlinedButton(
+                        onClick = { followFactor = factor },
+                        modifier = Modifier.weight(1f).padding(horizontal = 2.dp),
+                    ) {
+                        Text(
+                            (if (selected) "✓ " else "") + followLabel(factor),
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                        )
+                    }
+                }
+            }
         }
 
         if (offlineReview) {
@@ -220,6 +283,8 @@ internal fun SessionSetupScreen(
                 SessionOptions(
                     sourceAudioAvailable = sourceAudioAvailable,
                     voiceMode = if (whisper) VoiceMode.WHISPER else VoiceMode.ALOUD,
+                    handsFree = handsFree,
+                    followFactor = followFactor,
                 ),
                 resume,
             )
@@ -278,3 +343,14 @@ private fun offlineNotice(status: OfflinePlanStatus): String = when (status.avai
 
 /** 반복 횟수 상한. 입력칸은 두 자리까지 받는다. */
 private const val MAX_REPS = 99
+
+/** 따라 말할 시간 = 들려준 길이 × 배수. */
+private val FOLLOW_FACTORS = listOf(1f, 1.5f, 2f)
+
+private fun followLabel(factor: Float): String = when {
+    factor == 1f -> "같게"
+    factor % 1f == 0f -> "${factor.toInt()}배"
+    else -> "${factor}배"
+}
+
+private val WATCH_HEIGHT = 240.dp

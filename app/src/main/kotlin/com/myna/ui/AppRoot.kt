@@ -27,6 +27,8 @@ import com.myna.ui.settings.ApiKeyScreen
 import com.myna.ui.entry.ManualEntryScreen
 import com.myna.ui.home.HomeScreen
 import com.myna.ui.script.ScriptScreen
+import com.myna.ui.watch.FullScreenVideo
+import androidx.compose.runtime.mutableStateMapOf
 import com.myna.ui.onboarding.OnboardingScreen
 import com.myna.ui.session.SessionScreen
 import com.myna.ui.session.SessionSetupScreen
@@ -50,6 +52,8 @@ internal sealed interface Screen {
     data object Home : Screen
     data class ManualEntry(val videoUri: Uri?, val youTubeVideoId: String? = null) : Screen
     data class SessionSetup(val planId: String) : Screen
+    /** 영상 전체 화면. */
+    data class Watch(val planId: String) : Screen
     /** 영상의 전체 스크립트(영어·한글 뜻). */
     data class Script(val planId: String) : Screen
     /** 저장된 영상의 문장을 고친다 — 필요 없는 문장 지우기, 시작·끝 맞추기. */
@@ -85,6 +89,8 @@ internal fun AppRoot(
     var importingVideo by remember { mutableStateOf(false) }
     // 영상을 다시 연결하면 오른다 — "이 기기에서 열 수 있는가"를 다시 본다.
     var videoRevision by remember { mutableStateOf(0) }
+    // 영상을 보던 위치. 준비 화면의 작은 화면과 전체 화면을 오갈 때 이어 본다.
+    val watchPositions = remember { mutableStateMapOf<String, Long>() }
     // 스크립트 화면의 단어 시각 받기. 화면을 나가도 끝까지 받아 저장하도록 여기서 돌린다.
     var aligningPlanId by remember { mutableStateOf<String?>(null) }
     var alignStatus by remember { mutableStateOf<Pair<String, String>?>(null) }
@@ -201,6 +207,11 @@ internal fun AppRoot(
                 LaunchedEffect(current.planId) { screen = Screen.Home }
             } else {
                 SessionSetupScreen(
+                    watchYouTubeId = plan.transcript.sourceRef.takeIf { plan.transcript.source == VideoSource.YOUTUBE },
+                    watchVideoUri = localUri?.takeIf { isUpload && !videoMissing }?.let(Uri::parse),
+                    watchStartMs = watchPositions[current.planId] ?: 0L,
+                    onWatchPosition = { watchPositions[current.planId] = it },
+                    onFullScreen = { screen = Screen.Watch(current.planId) },
                     videoMissing = videoMissing,
                     relinkingVideo = importingVideo,
                     onRelinkVideo = { picked ->
@@ -232,6 +243,26 @@ internal fun AppRoot(
                     onBack = { screen = Screen.Home },
                     onEditSentences = { screen = Screen.EditPlan(plan.id.value) },
                     onOpenScript = { screen = Screen.Script(plan.id.value) },
+                )
+            }
+        }
+
+        is Screen.Watch -> {
+            val plan = state.plans[current.planId]
+            val source = plan?.transcript?.source
+            val youTubeId = plan?.transcript?.sourceRef?.takeIf { source == VideoSource.YOUTUBE }
+            val localVideo = repository.localMediaUri(current.planId)
+                ?.takeIf { source == VideoSource.UPLOAD }
+                ?.let(Uri::parse)
+            if (plan == null || (youTubeId == null && localVideo == null)) {
+                LaunchedEffect(current.planId) { screen = Screen.SessionSetup(current.planId) }
+            } else {
+                FullScreenVideo(
+                    youTubeVideoId = youTubeId,
+                    videoUri = localVideo,
+                    startMs = watchPositions[current.planId] ?: 0L,
+                    onPosition = { watchPositions[current.planId] = it },
+                    onClose = { screen = Screen.SessionSetup(current.planId) },
                 )
             }
         }

@@ -297,7 +297,22 @@ internal fun SessionScreen(
 
         Spacer(Modifier.height(12.dp))
 
-        if (ui.recording) {
+        val followRemaining = ui.followRemainingMs
+        if (ui.recording && followRemaining != null) {
+            // 손대지 않는 모드 — 따라 말할 시간이 줄어드는 걸 보여 주고, 끝나면 저절로 넘어간다.
+            Text(
+                "따라 말해 보세요 · ${(followRemaining + 999) / 1000}초",
+                style = MaterialTheme.typography.titleMedium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            ProgressBar(
+                fraction = if (ui.followTotalMs <= 0) 0f else 1f - followRemaining.toFloat() / ui.followTotalMs,
+            )
+            TextButton(onClick = { controller.finishRecording() }, modifier = Modifier.fillMaxWidth()) {
+                Text("바로 다음으로")
+            }
+        } else if (ui.recording) {
             Button(onClick = { controller.finishRecording() }, modifier = Modifier.fillMaxWidth()) {
                 Text(if (options.voiceMode == VoiceMode.WHISPER) "말했어요" else "말하기 끝")
             }

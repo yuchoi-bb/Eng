@@ -27,6 +27,13 @@ public data class SessionOptions(
      */
     val sourceAudioAvailable: Boolean = true,
     val voiceMode: VoiceMode = VoiceMode.ALOUD,
+    /**
+     * 손대지 않고 듣고 따라 하기. 말할 차례가 되면 녹음하지 않고, 들려준 길이만큼 기다렸다가
+     * 저절로 다음으로 넘어간다. 걷거나 운전하거나 설거지하며 화면을 못 볼 때 쓴다.
+     */
+    val handsFree: Boolean = false,
+    /** 손대지 않는 모드에서 따라 말할 시간 = 들려준 길이 × 이 배수. 왕초보는 늘려 쓴다. */
+    val followFactor: Float = 1f,
 ) {
     /**
      * 처음 듣는 회차의 단계 순서. REQUIREMENTS §7.2.
@@ -61,8 +68,20 @@ public data class SessionOptions(
         else -> listOf(ShadowingStage.SHADOW_WITH_TEXT, ShadowingStage.SHADOW_NO_TEXT)
     }
 
-    /** 녹음과 채점을 할 것인가. */
-    public val recordsVoice: Boolean get() = voiceMode == VoiceMode.ALOUD
+    /** 녹음과 채점을 할 것인가. 손대지 않는 모드는 "말하기 끝"을 누를 사람이 없으므로 녹음하지 않는다. */
+    public val recordsVoice: Boolean get() = voiceMode == VoiceMode.ALOUD && !handsFree
+
+    /**
+     * 손대지 않는 모드에서 말할 차례에 기다리는 시간.
+     *
+     * 들려준 구간이 배속으로 늘어난 만큼 따라 말하는 데도 걸린다. 거기에 말을 시작하기까지의
+     * 틈([FOLLOW_LEAD_MS])을 더한다 — 소리가 끝나자마자 재기 시작하면 첫 단어를 놓친다.
+     */
+    public fun followPauseMs(segmentMs: Int, playbackRate: Float): Long {
+        val rate = playbackRate.takeIf { it > 0f } ?: 1f
+        val spoken = segmentMs.coerceAtLeast(0) / rate * followFactor.coerceIn(0.5f, 4f)
+        return spoken.toLong() + FOLLOW_LEAD_MS
+    }
 
     /** 이 단계에서 마이크를 켜야 하는가. */
     public fun requiresRecording(stage: ShadowingStage): Boolean =
@@ -76,5 +95,8 @@ public data class SessionOptions(
          * 들으면 기억에서 꺼내는 연습은 살리면서 어긋난 곳을 스스로 알아챌 수 있다.
          */
         public const val RECALL_CHECK_INTERVAL: Int = 3
+
+        /** 소리가 끝나고 말을 시작하기까지의 틈. */
+        public const val FOLLOW_LEAD_MS: Long = 700
     }
 }
